@@ -233,9 +233,8 @@ builds Ceefax-style boards:
 * Each raw reply is saved as `last_<code>_<type>.json`. If a board stays empty, or the
   console says "none usable", send that file to whoever is maintaining the program so
   the field names can be matched.
-* The key is sent as both `Authorization: Bearer` and `X-API-Key`. If MyAirports wants it
-  some other way, add `header=` lines (they replace the defaults), e.g.
-  `header=x-api-key: {key}`, or put `{key}` in the `url=` line.
+* The key is sent in an `X-API-Key` header, as MyAirports asks. For a different API, add
+  `header=` lines (they replace the default), or put `{key}` in the `url=` line.
 
 ## Client keys
 

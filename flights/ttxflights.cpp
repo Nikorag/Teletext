@@ -26,7 +26,7 @@
  *     airport=LHR,HEATHROW,415
  *     airport=LGW,GATWICK,417
  *     url=https://myairports.online/api/airports/{code}/{type}
- *     header=Authorization: Bearer {key}     (repeat for more headers)
+ *     header=X-API-Key: {key}                (the default; repeat for more headers)
  *
  * Each raw reply is saved as last_<code>_<type>.json for checking.
  * Console keys: U = update now (uses requests)   Q = quit
@@ -196,10 +196,8 @@ static void LoadConfig()
             g_airports.push_back(a);
         }
     }
-    if (g_headers.empty()) {             /* send the key both common ways */
-        g_headers.push_back("Authorization: Bearer {key}");
+    if (g_headers.empty())               /* MyAirports wants the key like this */
         g_headers.push_back("X-API-Key: {key}");
-    }
     if (g_budget < 8) g_budget = 8;
     if (g_hourFrom < 0 || g_hourFrom > 23) g_hourFrom = 0;
     if (g_hourTo <= g_hourFrom || g_hourTo > 24) g_hourTo = 24;
