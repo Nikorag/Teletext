@@ -32,6 +32,8 @@ clients (on the same PC or across the LAN) connect to it and browse them like a 
 | `server\ttxserver.cfg` | Server settings: port, service name, edit password |
 | `feed\ttxfeed.cpp` | News feed program: turns RSS feeds (e.g. BBC News) into pages |
 | `feed\ttxfeed.cfg` | Feed settings: which feeds go on which pages |
+| `flights\ttxflights.cpp` | Airport arrivals/departures boards from a flight-data API |
+| `flights\ttxflights.cfg` | Flights settings: API key, airports, daily request budget |
 | `docs\` | Screenshots |
 
 The **server** and **news feed** build on Windows *and* on Linux / Raspberry Pi, so they
@@ -64,6 +66,10 @@ Each program is a single .cpp file, and each gets its own project.
 **News feed** (only needed if the server runs on Windows)
 1. File > New > Project > **Console Application**, C++, name it `ttxfeed`.
 2. Add `ttxfeed.cpp`. Linker: `-lwininet`
+
+**Airport boards** (only needed if the server runs on Windows)
+1. File > New > Project > **Console Application**, C++, name it `ttxflights`.
+2. Add `ttxflights.cpp`. Linker: `-lwininet`
 
 **No projects?** If you just open a .cpp and press Compile, project settings don't apply.
 Instead, go to Tools > Compiler Options and tick *"Add the following commands when calling the
@@ -102,6 +108,7 @@ into `~/teletext/` (WinSCP works well for this from Windows).
 sudo apt install g++ curl
 cd ~/teletext/server && g++ -O2 -o ttxserver ttxserver.cpp
 cd ~/teletext/feed   && g++ -O2 -o ttxfeed   ttxfeed.cpp
+cd ~/teletext/flights && g++ -O2 -o ttxflights ttxflights.cpp
 ```
 
 **3. Settings.** In `~/teletext/server/ttxserver.cfg`:
@@ -191,6 +198,42 @@ time):
 * The feeds carry headlines and a one-line summary only. The full stories are on the BBC
   website. The pages say "Source: BBC News". This is fine for personal use at home, but
   don't republish the pages publicly.
+
+## Airport arrivals and departures (ttxflights)
+
+`ttxflights` fetches live flight lists from the **MyAirports** API (myairports.online) and
+builds Ceefax-style boards:
+
+| Page | Board |
+|---|---|
+| 410 | Airports index |
+| 411 / 412 | Southampton arrivals / departures |
+| 413 / 414 | Bristol |
+| 415 / 416 | Heathrow |
+| 417 / 418 | Gatwick |
+
+* Each line shows the time, flight, from/to and status: On time, Exp 14:35, Boarding,
+  Gate shut, Lnd 14:31, Dep 14:40, In flight, Cancelled (in red), and so on. Codeshare
+  duplicates are left out.
+* Busy airports get up to 3 subpages that rotate every 10 seconds.
+* Coloured keys: red = the other board for that airport, green/yellow = next/previous
+  airport, cyan = index.
+* **Setup:** sign up at MyAirports and create an API key (it starts `ma_live_`) in the
+  developer dashboard. Put it in `ttxflights.cfg` as `apikey=`, and set `pagesdir=`
+  as for ttxfeed. Run it on the same machine as the server.
+* **Daily limit:** a free account allows 100 requests a day. Each update costs one request
+  per board, so 4 airports use 8. ttxflights keeps count in `ttxflights.state`, which
+  survives restarts. It spreads its updates to stay under `budget=` (default 95), only
+  between the hours in `hours=` (default 6-23). With 4 airports that is roughly every
+  2 hours. Fewer airports or a shorter day means more frequent updates.
+* Add or change airports with `airport=CODE,NAME,page` (the arrivals page; departures go
+  on the next page). Use the 3-letter IATA airport code.
+* Each raw reply is saved as `last_<code>_<type>.json`. If a board stays empty, or the
+  console says "none usable", send that file to whoever is maintaining the program so
+  the field names can be matched.
+* The key is sent as both `Authorization: Bearer` and `X-API-Key`. If MyAirports wants it
+  some other way, add `header=` lines (they replace the defaults), e.g.
+  `header=x-api-key: {key}`, or put `{key}` in the `url=` line.
 
 ## Client keys
 
