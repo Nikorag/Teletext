@@ -38,6 +38,7 @@
  *     "PAGE ppp s n red green yellow cyan index\n" + 1000 bytes
  *     "HDR\n" + 40 bytes   (header row with clock)
  *     "NOPAGE ppp\n"
+ *     "FLASH ppp headline\n"  newsflash (from pages/newsflash.txt), "FLASH\n" = clear
  */
 
 #ifdef _WIN32
@@ -154,6 +155,7 @@ static std::vector<Client>  g_clients;
 static std::string          g_serviceName = "TELETEXT";
 static std::string          g_password;
 static std::string          g_signature;
+static std::string          g_flash;          /* current newsflash "ppp headline", or "" */
 
 static void ClearSub(SubPage &s) { memset(s.cell, ' ', sizeof(s.cell)); }
 
@@ -777,6 +779,42 @@ static void LoadAllPages()
 /*  Commands from clients                                              */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/*  Newsflash: ttxfeed writes pages/newsflash.txt ("ppp headline")     */
+/*  while there is breaking news; we pass it on to every viewer.       */
+/* ------------------------------------------------------------------ */
+
+static std::string ReadFlash()
+{
+    FILE *f = fopen(PAGE_DIR "/newsflash.txt", "rb");
+    if (!f) return "";
+    char line[512] = "";
+    if (!fgets(line, sizeof(line), f)) line[0] = 0;
+    fclose(f);
+    std::string s;
+    for (char *p = line; *p && *p != '\n' && *p != '\r'; p++)
+        s += (*p >= 0x20 && *p < 0x7F) ? *p : ' ';
+    int page = 0;
+    if (sscanf(s.c_str(), "%x", &page) != 1 || page < 0x100 || page > 0x8FF) return "";
+    return s;
+}
+
+static void SendFlash(Client &c)
+{
+    SendText(c, g_flash.empty() ? std::string("FLASH\n") : "FLASH " + g_flash + "\n");
+}
+
+static void CheckFlash()
+{
+    std::string f = ReadFlash();
+    if (f == g_flash) return;
+    g_flash = f;
+    if (f.empty()) printf("Newsflash cleared\n");
+    else           printf("NEWSFLASH: %s\n", f.c_str());
+    for (size_t i = 0; i < g_clients.size(); i++)
+        if (g_clients[i].page) SendFlash(g_clients[i]);
+}
+
 static bool MayEdit(Client &c)
 {
     return g_password.empty() || c.authed;
@@ -821,9 +859,11 @@ static void HandleLine(Client &c, const std::string &line)
             SendText(c, msg);
             return;
         }
+        bool first = (c.page == 0);
         c.page     = page;
         c.fixedSub = (n == 2 && sub > 0) ? sub - 1 : -1;
         SendPage(c);
+        if (first && !g_flash.empty()) SendFlash(c);     /* newcomer: show current newsflash */
         printf("[%s] page %03X%s\n", c.addr, page, n == 2 ? " (subpage)" : "");
     }
     else if (line == "LIST") {
@@ -988,6 +1028,7 @@ int main(int argc, char *argv[])
 
     printf("=== Teletext server '%s' on port %d ===\n", g_serviceName.c_str(), port);
     LoadAllPages();
+    g_flash = ReadFlash();
     ShowAddresses(port);
     if (g_password.empty())
         printf("NOTE: no password set - anyone on your network can change pages.\n"
@@ -1060,6 +1101,7 @@ int main(int argc, char *argv[])
                     printf("Pages folder changed - reloading\n");
                     LoadAllPages();
                 }
+                CheckFlash();
             }
         }
 

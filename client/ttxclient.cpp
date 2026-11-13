@@ -14,7 +14,8 @@
  *
  * Keys:  0-9 page number    Up/Down next/prev page   Left/Right subpage
  *        F1-F4 Fastext      F5 or I index            R reveal   H hold
- *        Esc cancel entry   Mouse: click a page number or Fastext link
+ *        Esc cancel entry / dismiss newsflash     F6 go to newsflash story
+ *        Mouse: click a page number, a Fastext link or the newsflash strip
  *
  * Dev-C++: Windows Application.
  *   Project > Project Options > Parameters > Linker:   -lws2_32 -lgdi32
@@ -31,6 +32,7 @@
 #define WM_SOCKET    (WM_APP + 1)
 #define TIMER_FLASH  1
 #define TIMER_RETRY  2
+#define TIMER_TICKER 3
 
 #define ROWS      25
 #define COLS      40
@@ -55,6 +57,14 @@ static bool  g_reveal    = false;
 static bool  g_hold      = false;
 static bool  g_flashOn   = true;
 static bool  g_waiting   = false;     /* a GET is outstanding */
+
+/* newsflash strip across the bottom row (sent by the server) */
+static std::string g_flashText;       /* headline, "" = none           */
+static int         g_flashPage = 0;   /* story page                    */
+static std::string g_flashDismissed;  /* headline the viewer closed    */
+static int         g_flashPos  = 0;   /* ticker scroll position        */
+
+static bool FlashShowing() { return !g_flashText.empty() && g_flashText != g_flashDismissed; }
 
 static SOCKET      g_sock = INVALID_SOCKET;
 static bool        g_connected = false;
@@ -258,6 +268,22 @@ static void ProcessRx()
             memcpy(g_screen[0] + 8, data + 8, COLS - 8);  /* clock keeps running */
             g_rx.erase(0, nl + 1 + COLS);
         }
+        else if (line.compare(0, 5, "FLASH") == 0) {
+            std::string old = g_flashText;
+            int pg = 0;
+            char text[512] = "";
+            if (sscanf(line.c_str() + 5, " %x %511[^\n]", &pg, text) == 2) {
+                g_flashPage = pg;
+                g_flashText = text;
+            } else {
+                g_flashText.clear();
+            }
+            if (g_flashText != old) {
+                g_flashPos = 0;
+                if (FlashShowing()) MessageBeep(MB_ICONEXCLAMATION);
+            }
+            g_rx.erase(0, nl + 1);
+        }
         else if (line.compare(0, 7, "NOPAGE ") == 0) {
             int pn = 0;
             sscanf(line.c_str() + 7, "%x", &pn);
@@ -333,6 +359,19 @@ static void DrawChar(int x, int y, int h, unsigned char c, int fg, bool dbl)
     }
 }
 
+/* Newsflash strip for the bottom row: flashing NEWSFLASH on red,
+ * then the headline scrolling past in yellow on blue. */
+static void OverlayFlash(unsigned char *row)
+{
+    static const unsigned char head[17] = {
+        0x01, 0x1D, 0x07, 0x08, 'N','E','W','S','F','L','A','S','H', 0x09, 0x04, 0x1D, 0x03 };
+    memcpy(row, head, sizeof(head));
+    std::string loop = g_flashText + "   +++   ";
+    int w = COLS - (int)sizeof(head);
+    for (int i = 0; i < w; i++)
+        row[sizeof(head) + i] = (unsigned char)(loop[(g_flashPos + i) % loop.size()] & 0x7F);
+}
+
 /* Fill in columns 0-7 of the header: page number being entered / shown */
 static void OverlayHeader(unsigned char *row)
 {
@@ -364,6 +403,7 @@ static void RenderScreen()
         unsigned char rb[COLS];
         memcpy(rb, g_screen[row], COLS);
         if (row == 0) OverlayHeader(rb);
+        if (row == ROWS - 1 && FlashShowing()) OverlayFlash(rb);
 
         bool rowHasDbl = false;
         if (row > 0 && row < ROWS - 1)
@@ -510,6 +550,11 @@ static void ClickAt(int px, int py)
             return;
         }
     }
+    if (row == ROWS - 1 && FlashShowing()) {       /* newsflash strip: go to the story */
+        g_hold = false;
+        RequestPage(g_flashPage, 0);
+        return;
+    }
     if (row == ROWS - 1) {          /* Fastext row: work out text colour at the click */
         int fg = 7;
         for (int c = 0; c <= col; c++) {
@@ -553,6 +598,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
     case WM_TIMER:
         if (wp == TIMER_FLASH) { g_flashOn = !g_flashOn; Redraw(); }
+        else if (wp == TIMER_TICKER) {
+            if (FlashShowing()) { g_flashPos++; Redraw(); }
+        }
         else if (wp == TIMER_RETRY) { KillTimer(hwnd, TIMER_RETRY); NetConnect(); }
         return 0;
 
@@ -566,7 +614,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             UpdateTitle(); Redraw();
             break;
         case 'i': GoLink(4); break;
-        case 27:  g_entryLen = 0; Redraw(); break;   /* Esc */
+        case 27:                                     /* Esc */
+            if (g_entryLen) g_entryLen = 0;
+            else if (FlashShowing()) g_flashDismissed = g_flashText;
+            Redraw();
+            break;
         }
         return 0;
 
@@ -577,6 +629,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case VK_F3: GoLink(2); break;
         case VK_F4: GoLink(3); break;
         case VK_F5: GoLink(4); break;
+        case VK_F6:
+            if (!g_flashText.empty()) { g_hold = false; RequestPage(g_flashPage, 0); }
+            break;
         case VK_UP:    case VK_PRIOR: StepPage(+1); break;
         case VK_DOWN:  case VK_NEXT:  StepPage(-1); break;
         case VK_RIGHT: StepSubpage(+1); break;
@@ -697,6 +752,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int nShow)
     UpdateWindow(g_hwnd);
 
     SetTimer(g_hwnd, TIMER_FLASH, 500, NULL);
+    SetTimer(g_hwnd, TIMER_TICKER, 250, NULL);
     NetConnect();
 
     MSG msg;

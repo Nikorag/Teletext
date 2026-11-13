@@ -697,6 +697,29 @@ static void UpdateBreaking()
     }
     Put(p, 23, 0, A_GREEN "Source: " + g_source);
     Put(p, 24, 0, A_RED "Full story  " A_GREEN "Headlines  " A_CYAN "Index");
+    /* tell the server, which shows a newsflash strip on every client:
+       "ppp headline" while breaking, empty when not */
+    std::string flash;
+    if (breaking) flash = Hex3(l.page) + " " + l.title.substr(0, 200) + "\n";
+    std::string fpath = g_pagesDir + "/newsflash.txt";
+    std::string old;
+    FILE *ff = fopen(fpath.c_str(), "rb");
+    if (ff) {
+        char b[512];
+        size_t n;
+        while ((n = fread(b, 1, sizeof(b), ff)) > 0) old.append(b, n);
+        fclose(ff);
+    }
+    if (old != flash || !ff) {
+        std::string tmp = g_pagesDir + "/~newsflash.tmp";
+        ff = fopen(tmp.c_str(), "wb");
+        if (ff) {
+            fwrite(flash.data(), 1, flash.size(), ff);
+            fclose(ff);
+            if (!ReplaceWith(tmp.c_str(), fpath.c_str())) remove(tmp.c_str());
+        }
+    }
+
     int links[5] = { l.page, l.feedPage, 0, g_indexPage, g_indexPage };
     bool changed = WriteIfChanged(g_breakingPage,
                                   MakeTTI(p, g_breakingPage, "Breaking news", links));

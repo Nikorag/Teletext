@@ -198,6 +198,12 @@ time):
   and the headline in double height. Otherwise it says there's no breaking news and shows
   the latest headline. Red goes to the full story, green to that section's headlines.
   Set `breakingpage=0` to turn it off.
+* **Newsflash on every screen:** while a story counts as breaking, every client shows a
+  strip across the bottom row, whatever page it is on. "NEWSFLASH" flashes on red, the
+  headline scrolls past on blue, and the PC beeps once when it arrives. Click the strip or
+  press **F6** to read the story; press **Esc** to dismiss it. The strip goes away by
+  itself when the story is more than `breakingminutes=` old. (ttxfeed passes the headline
+  to the server in `pages/newsflash.txt`.)
 * A page is only rewritten when the news changes. If a download fails, the old pages stay.
 * Run it on the same machine as the server, with `pagesdir=` pointing at the server's
   `pages` folder. On Linux it downloads with `curl`; on Windows with WinINet.
@@ -301,7 +307,8 @@ protection was blocking API requests that come from programs, so it may not work
 | F5 or I | Index page |
 | R | Reveal or hide concealed text |
 | H | Hold: freeze the page so the carousel doesn't change it |
-| Esc | Cancel a half-typed page number |
+| Esc | Cancel a half-typed page number, or dismiss a newsflash |
+| F6 | Go to the newsflash story |
 | Mouse | Click any 3-digit page number on screen, or a coloured Fastext link |
 
 You can resize or maximise the window. The page always keeps a 4:3 TV shape.
@@ -412,6 +419,7 @@ Server to client: a text line, then fixed-size binary data.
 | `PAGE ppp s n red green yellow cyan index\n` | 1000 bytes: 25 rows x 40 columns, 7-bit Teletext codes. `s`/`n` = subpage / count. Links are hex page numbers, `000` = none |
 | `HDR\n` | 40 bytes: a new header row (clock update) |
 | `NOPAGE ppp\n` | nothing |
+| `FLASH ppp headline\n` | nothing: show a newsflash for story page ppp (`FLASH\n` alone clears it) |
 
 Because the frame sizes are fixed, the client can always tell where one message ends. It
 waits until a whole frame has arrived before using it. You could write a client in
