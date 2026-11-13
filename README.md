@@ -193,6 +193,11 @@ time):
   the next 9 numbers are used for the stories. Most BBC News and Sport pages have a feed at
   the same address on `feeds.bbci.co.uk` with `/rss.xml` on the end, e.g.
   `https://feeds.bbci.co.uk/sport/football/rss.xml`.
+* **Breaking news, page 190:** the newest story from all the feeds. If it was published in
+  the last hour (`breakingminutes=60`), the page shows a flashing red BREAKING NEWS banner
+  and the headline in double height. Otherwise it says there's no breaking news and shows
+  the latest headline. Red goes to the full story, green to that section's headlines.
+  Set `breakingpage=0` to turn it off.
 * A page is only rewritten when the news changes. If a download fails, the old pages stay.
 * Run it on the same machine as the server, with `pagesdir=` pointing at the server's
   `pages` folder. On Linux it downloads with `curl`; on Windows with WinINet.
