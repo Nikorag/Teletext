@@ -710,12 +710,24 @@ static void MakeStatus(Flight &f, const std::string &raw, time_t sched, time_t e
 
 static bool ByTime(const Flight &a, const Flight &b) { return a.when < b.when; }
 
-static int ParseFlights(const std::string &json, bool arrivals, std::vector<Flight> &list)
+static int ParseFlights(const std::string &json, bool arrivals, std::vector<Flight> &list,
+                        std::string &dataTime)
 {
     list.clear();
+    dataTime.clear();
     Fields all;
     size_t i = 0;
     if (!ParseValue(json, i, "", all, 0)) return -1;
+
+    /* when the API collected the data (MyAirports: "scrapedAt") */
+    for (size_t k = 0; k < all.size(); k++) {
+        std::string key = Norm(all[k].first);
+        if (key == "scrapedat" || key == "updatedat" || key == "lastupdated" || key == "timestamp") {
+            time_t t = ParseTime(all[k].second);
+            if (t) dataTime = HHMM(t);
+            break;
+        }
+    }
     std::vector<Fields> recs;
     SplitRecords(all, recs);
 
@@ -867,7 +879,7 @@ static void BuildBoard(std::vector<Page> &subs, const Airport &a, bool arrivals,
             Put(p, row++, 0, line);
         }
         if (list.empty()) Put(p, 8, 0, A_WHITE "No flights to show at the moment");
-        Put(p, 23, 0, A_GREEN "Updated " + updated + "  Times are local");
+        Put(p, 23, 0, A_GREEN "Flight data from " + updated + "  Times are local");
         Put(p, 24, 0, std::string(A_RED) + (arrivals ? "Departures " : "Arrivals   ")
                       + A_GREEN "Next airport " A_YELLOW "Back  " A_CYAN "Index");
         subs.push_back(p);
@@ -921,13 +933,14 @@ static void UpdateBoard(size_t ai, bool arrivals, const std::string &updated)
     if (status != 200) { printf("HTTP %d - see %s\n", status, dump.c_str()); return; }
 
     std::vector<Flight> list;
-    int recs = ParseFlights(body, arrivals, list);
+    std::string dataTime;
+    int recs = ParseFlights(body, arrivals, list, dataTime);
     if (recs < 0) { printf("reply is not JSON - see %s\n", dump.c_str()); return; }
     if (recs > 0 && list.empty())
         printf("(%d records, none usable - please send %s) ", recs, dump.c_str());
 
     std::vector<Page> subs;
-    BuildBoard(subs, a, arrivals, list, updated);
+    BuildBoard(subs, a, arrivals, list, dataTime.empty() ? updated : dataTime);
     int page = a.page + (arrivals ? 0 : 1);
     size_t n = g_airports.size();
     const Airport &next = g_airports[(ai + 1) % n];

@@ -212,10 +212,12 @@ builds Ceefax-style boards:
 | 415 / 416 | Heathrow |
 | 417 / 418 | Gatwick |
 
-* Each line shows the time, flight, from/to and status: On time, Exp 14:35, Boarding,
+* Checked against a real MyAirports reply. Each line shows the time, flight, from/to and status: On time, Exp 14:35, Boarding,
   Gate shut, Lnd 14:31, Dep 14:40, In flight, Cancelled (in red), and so on. Codeshare
   duplicates are left out.
 * Busy airports get up to 3 subpages that rotate every 10 seconds.
+* The foot of each board shows when MyAirports collected the data ("Flight data from
+  14:25"). It can be older than the update time, because MyAirports caches its data.
 * Coloured keys: red = the other board for that airport, green/yellow = next/previous
   airport, cyan = index.
 * **Setup:** sign up at MyAirports and create an API key (it starts `ma_live_`) in the
