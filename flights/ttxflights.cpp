@@ -1,8 +1,8 @@
 /*
  * ttxflights.cpp  -  Airport arrivals and departures boards for ttxserver
  * ------------------------------------------------------------------------
- * Fetches live flight lists from a flight-data web API (MyAirports by
- * default) and writes Ceefax-style boards as .tti pages:
+ * Fetches live flight lists from a flight-data web API (FlightAware
+ * AeroAPI, MyAirports and similar) and writes Ceefax-style boards:
  *
  *     index page          list of airports              (e.g. 410)
  *     page N              arrivals for an airport       (e.g. 411)
@@ -87,7 +87,11 @@ static std::vector<std::string> g_headers;
 static std::string g_apiKey;
 static std::string g_pagesDir  = "../server/pages";
 static std::string g_url       = "https://myairports.online/api/airports/{code}/{type}";
-static int         g_budget    = 95;
+static int         g_budget    = 95;      /* requests a day (MyAirports style)    */
+static double      g_monthly   = 0;       /* dollars a month (FlightAware style)  */
+static double      g_pagePrice = 0;       /* dollars per result set / page        */
+static int         g_maxPages  = 1;       /* pages asked for per board            */
+static int         g_gap       = 0;       /* seconds between requests             */
 static int         g_hourFrom  = 6, g_hourTo = 23;
 static int         g_indexPage = 0x410;
 
@@ -170,6 +174,10 @@ static void LoadConfig()
             else if (!_stricmp(key, "url"))       g_url = val;
             else if (!_stricmp(key, "header"))    g_headers.push_back(val);
             else if (!_stricmp(key, "budget"))    g_budget = atoi(val);
+            else if (!_stricmp(key, "monthlybudget")) g_monthly = atof(val);
+            else if (!_stricmp(key, "pageprice")) g_pagePrice = atof(val);
+            else if (!_stricmp(key, "maxpages"))  g_maxPages = atoi(val);
+            else if (!_stricmp(key, "gap"))       g_gap = atoi(val);
             else if (!_stricmp(key, "indexpage")) g_indexPage = (int)strtol(val, NULL, 16);
             else if (!_stricmp(key, "hours"))     sscanf(val, "%d-%d", &g_hourFrom, &g_hourTo);
             else if (!_stricmp(key, "airport")) {
@@ -199,41 +207,61 @@ static void LoadConfig()
     if (g_headers.empty())               /* MyAirports wants the key like this */
         g_headers.push_back("X-API-Key: {key}");
     if (g_budget < 8) g_budget = 8;
+    if (g_maxPages < 1) g_maxPages = 1;
+    if (g_gap < 0) g_gap = 0;
     if (g_hourFrom < 0 || g_hourFrom > 23) g_hourFrom = 0;
     if (g_hourTo <= g_hourFrom || g_hourTo > 24) g_hourTo = 24;
 }
 
 /* ------------------------------------------------------------------ */
-/*  Daily request count, kept in a file so restarts don't reset it     */
+/*  Usage so far: requests today, and dollars spent this month.        */
+/*  Kept in ttxflights.state so restarts don't reset it.               */
 /* ------------------------------------------------------------------ */
 
-static std::string Today()
+static std::string NowFmt(const char *fmt)
 {
     time_t t = time(NULL);
     char buf[16];
-    strftime(buf, sizeof(buf), "%Y-%m-%d", localtime(&t));
+    strftime(buf, sizeof(buf), fmt, localtime(&t));
     return buf;
 }
 
-static int RequestsToday()
+struct Usage { std::string day, month; int count; double spend; };
+
+static Usage LoadUsage()
 {
+    Usage u;
+    u.count = 0;
+    u.spend = 0;
     FILE *f = fopen("ttxflights.state", "r");
-    if (!f) return 0;
-    char day[16] = "";
-    int n = 0;
-    if (fscanf(f, "%15s %d", day, &n) != 2) n = 0;
-    fclose(f);
-    return Today() == day ? n : 0;
+    if (f) {
+        char day[16] = "", month[16] = "";
+        int n = 0;
+        double sp = 0;
+        int got = fscanf(f, "%15s %d %15s %lf", day, &n, month, &sp);
+        fclose(f);
+        if (got >= 2) { u.day = day; u.count = n; }
+        if (got >= 4) { u.month = month; u.spend = sp; }
+    }
+    if (u.day != NowFmt("%Y-%m-%d")) { u.day = NowFmt("%Y-%m-%d"); u.count = 0; }
+    if (u.month != NowFmt("%Y-%m")) { u.month = NowFmt("%Y-%m"); u.spend = 0; }
+    return u;
 }
 
-static void AddRequests(int k)
+static void AddUsage(int requests, double dollars)
 {
-    int n = RequestsToday() + k;
+    Usage u = LoadUsage();
+    u.count += requests;
+    u.spend += dollars;
     FILE *f = fopen("ttxflights.state", "w");
     if (!f) return;
-    fprintf(f, "%s %d\n", Today().c_str(), n);
+    fprintf(f, "%s %d %s %.4f\n", u.day.c_str(), u.count, u.month.c_str(), u.spend);
     fclose(f);
 }
+
+static int RequestsToday()      { return LoadUsage().count; }
+static double SpentThisMonth()  { return LoadUsage().spend; }
+static bool DollarMode()        { return g_monthly > 0 && g_pagePrice > 0; }
 
 /* ------------------------------------------------------------------ */
 /*  Downloading                                                        */
@@ -620,7 +648,7 @@ static std::string CodeName(const std::string &c)
 /*  Turning API records into flights                                   */
 /* ------------------------------------------------------------------ */
 
-static const char *kFlight[] = { "flightnumber", "flightiata", "flight.iata", "flight.iatanumber",
+static const char *kFlight[] = { "identiata", "flightnumber", "flightiata", "flight.iata", "flight.iatanumber",
     "flight.number", "flightno", "iatanumber", "flightcode", "flight", "number", "ident",
     "callsign", NULL };
 static const char *kAirline[] = { "airline.iata", "airlineiata", "airline.code", "airlinecode",
@@ -634,10 +662,11 @@ static const char *kFrom[] = { "origincity", "origin.city", "origin.name", "orig
     "departure.airportname", "departure.airport", "fromcity", "from", "origin",
     "origin.iata", "origin.code", "originiata", "origincode", "departure.iata",
     "departure.iatacode", NULL };
-static const char *kArrSched[] = { "arrival.scheduledtime", "arrival.scheduled",
+static const char *kArrSched[] = { "scheduledin", "scheduledon", "arrival.scheduledtime", "arrival.scheduled",
     "arrival.scheduled.local", "scheduledarrival", "scheduledarrivaltime", "sta",
     "scheduledtime", "scheduled", "time", "scheduledat", "datetime", NULL };
-static const char *kArrEst[] = { "arrival.actualtime", "arrival.actual", "arrival.estimatedtime",
+static const char *kArrEst[] = { "actualin", "actualon", "estimatedin", "estimatedon",
+    "arrival.actualtime", "arrival.actual", "arrival.estimatedtime",
     "arrival.estimated", "actualarrival", "estimatedarrival", "ata", "eta", "actualtime",
     "actual", "estimatedtime", "estimated", "expectedtime", "expected", "revisedtime",
     "revised", NULL };
@@ -648,10 +677,11 @@ static const char *kTo[] = { "destinationcity", "destination.city", "destination
     "arrival.city", "arrival.airport.name", "arrival.airportname", "arrival.airport",
     "tocity", "to", "destination", "destination.iata", "destination.code",
     "destinationiata", "destinationcode", "arrival.iata", "arrival.iatacode", NULL };
-static const char *kDepSched[] = { "departure.scheduledtime", "departure.scheduled",
+static const char *kDepSched[] = { "scheduledout", "scheduledoff", "departure.scheduledtime", "departure.scheduled",
     "departure.scheduled.local", "scheduleddeparture", "scheduleddeparturetime", "std",
     "scheduledtime", "scheduled", "time", "scheduledat", "datetime", NULL };
-static const char *kDepEst[] = { "departure.actualtime", "departure.actual",
+static const char *kDepEst[] = { "actualout", "actualoff", "estimatedout", "estimatedoff",
+    "departure.actualtime", "departure.actual",
     "departure.estimatedtime", "departure.estimated", "actualdeparture", "estimateddeparture",
     "atd", "etd", "actualtime", "actual", "estimatedtime", "estimated", "expectedtime",
     "expected", "revisedtime", "revised", NULL };
@@ -679,6 +709,7 @@ static void MakeStatus(Flight &f, const std::string &raw, time_t sched, time_t e
         return;
     }
     if (!arrivals && (s.find("depart") != std::string::npos || s.find("airborne") != std::string::npos ||
+                      s.find("left gate") != std::string::npos || s.find("taxi") != std::string::npos ||
                       s.find("en route") != std::string::npos || s.find("active") != std::string::npos)) {
         f.status = est ? "Dep " + HHMM(est) : "Departed";
         f.colour = 2;
@@ -912,11 +943,23 @@ static void UpdateBoard(size_t ai, bool arrivals, const std::string &updated)
     ReplaceAll(url, "{code}", a.code);
     ReplaceAll(url, "{type}", type);
     ReplaceAll(url, "{key}", g_apiKey);
+    char pages[8];
+    sprintf(pages, "%d", g_maxPages);
+    ReplaceAll(url, "{pages}", pages);
 
     printf("%s %-10s ", a.code.c_str(), type);
     std::string body;
     int status = Fetch(url, body);
-    if (url.compare(0, 4, "http") == 0) AddRequests(1);
+    if (url.compare(0, 4, "http") == 0) {
+        int used = 1;                                   /* FlightAware: "num_pages" */
+        size_t np = body.find("\"num_pages\"");
+        if (np != std::string::npos) {
+            size_t c = body.find(':', np);
+            if (c != std::string::npos && atoi(body.c_str() + c + 1) > 0)
+                used = atoi(body.c_str() + c + 1);
+        }
+        AddUsage(1, status == 200 ? used * g_pagePrice : 0);
+    }
 
     std::string dump = "last_" + a.code + "_" + type + ".json";
     FILE *f = fopen(dump.c_str(), "wb");
@@ -927,7 +970,7 @@ static void UpdateBoard(size_t ai, bool arrivals, const std::string &updated)
         printf("key refused (HTTP %d) - check apikey= in ttxflights.cfg\n", status);
         return;
     }
-    if (status == 429) { printf("daily limit reached at the API (HTTP 429)\n"); return; }
+    if (status == 429) { printf("too many requests (HTTP 429) - try a bigger gap=\n"); return; }
     if (status != 200) { printf("HTTP %d - see %s\n", status, dump.c_str()); return; }
 
     std::vector<Flight> list;
@@ -957,8 +1000,12 @@ static void UpdateBoard(size_t ai, bool arrivals, const std::string &updated)
 static void UpdateAll()
 {
     std::string updated = HHMM(time(NULL));
-    printf("\n--- Updating at %s (requests used today: %d of %d) ---\n",
-           updated.c_str(), RequestsToday(), g_budget);
+    if (DollarMode())
+        printf("\n--- Updating at %s (spent this month: $%.2f of $%.2f) ---\n",
+               updated.c_str(), SpentThisMonth(), g_monthly);
+    else
+        printf("\n--- Updating at %s (requests used today: %d of %d) ---\n",
+               updated.c_str(), RequestsToday(), g_budget);
 
     Page idx;
     BuildIndex(idx);
@@ -966,10 +1013,11 @@ static void UpdateAll()
     int links[5] = { g_airports[0].page, 0, 0, 0x100, 0x100 };
     WriteIfChanged(g_indexPage, MakeTTI(one, g_indexPage, "Airports index", links, 8));
 
-    for (size_t i = 0; i < g_airports.size(); i++) {
-        UpdateBoard(i, true, updated);
-        UpdateBoard(i, false, updated);
-    }
+    for (size_t i = 0; i < g_airports.size(); i++)
+        for (int arr = 1; arr >= 0; arr--) {
+            if ((i || !arr) && g_gap) SleepMs(g_gap * 1000);   /* respect rate limits */
+            UpdateBoard(i, arr == 1, updated);
+        }
 }
 
 int main()
@@ -979,10 +1027,12 @@ int main()
     MakeDir(g_pagesDir.c_str());
 
     int perRun = (int)g_airports.size() * 2;
-    int runs = g_budget / perRun;
-    if (runs < 1) runs = 1;
+    double runCost = perRun * g_maxPages * g_pagePrice;      /* dollars, worst case */
     int activeMin = (g_hourTo - g_hourFrom) * 60;
-    int interval = activeMin / runs;
+    double runsPerDay = DollarMode() ? (g_monthly / 31.0) / runCost
+                                     : (double)(g_budget / perRun);
+    if (runsPerDay < 1) runsPerDay = 1;
+    int interval = (int)(activeMin / runsPerDay);
     if (interval < 15) interval = 15;
 
     printf("=== Teletext airport boards ===\n");
@@ -990,8 +1040,14 @@ int main()
     for (size_t i = 0; i < g_airports.size(); i++)
         printf("   %s  %-14s arrivals %03X  departures %03X\n", g_airports[i].code.c_str(),
                g_airports[i].name.c_str(), g_airports[i].page, g_airports[i].page + 1);
-    printf("%d requests per update, budget %d a day -> updating every %d minutes, %02d:00-%02d:00\n",
-           perRun, g_budget, interval, g_hourFrom, g_hourTo);
+    if (DollarMode())
+        printf("Up to $%.3f per update, budget $%.2f a month -> updating every %d minutes, %02d:00-%02d:00\n",
+               runCost, g_monthly, interval, g_hourFrom, g_hourTo);
+    else
+        printf("%d requests per update, budget %d a day -> updating every %d minutes, %02d:00-%02d:00\n",
+               perRun, g_budget, interval, g_hourFrom, g_hourTo);
+    if (g_monthly > 0 && g_pagePrice <= 0)
+        printf("WARNING: monthlybudget= is set but pageprice= is not - set both\n");
     if (g_apiKey.empty() && g_url.compare(0, 4, "http") == 0)
         printf("WARNING: no apikey= in ttxflights.cfg\n");
     printf("U = update now   Q = quit\n");
@@ -1011,9 +1067,15 @@ int main()
 
         if (force || (inHours && now >= next)) {
             bool local = g_url.compare(0, 4, "http") != 0;
-            if (!local && RequestsToday() + perRun > g_budget) {
-                if (force) printf("Not enough requests left today (%d used of %d)\n",
-                                  RequestsToday(), g_budget);
+            bool over = DollarMode() ? SpentThisMonth() + runCost > g_monthly
+                                     : RequestsToday() + perRun > g_budget;
+            if (!local && over) {
+                if (force) {
+                    if (DollarMode()) printf("Not enough budget left this month ($%.2f of $%.2f spent)\n",
+                                             SpentThisMonth(), g_monthly);
+                    else printf("Not enough requests left today (%d used of %d)\n",
+                                RequestsToday(), g_budget);
+                }
             } else {
                 UpdateAll();
                 printf("Next update in %d minutes. U = update now, Q = quit\n", interval);

@@ -201,8 +201,8 @@ time):
 
 ## Airport arrivals and departures (ttxflights)
 
-`ttxflights` fetches live flight lists from the **MyAirports** API (myairports.online) and
-builds Ceefax-style boards:
+`ttxflights` fetches live flight lists from a flight-data API and builds Ceefax-style
+boards:
 
 | Page | Board |
 |---|---|
@@ -212,29 +212,49 @@ builds Ceefax-style boards:
 | 415 / 416 | Heathrow |
 | 417 / 418 | Gatwick |
 
-* Checked against a real MyAirports reply. Each line shows the time, flight, from/to and status: On time, Exp 14:35, Boarding,
+* Each line shows the time, flight, from/to and status: On time, Exp 14:35, Boarding,
   Gate shut, Lnd 14:31, Dep 14:40, In flight, Cancelled (in red), and so on. Codeshare
   duplicates are left out.
 * Busy airports get up to 3 subpages that rotate every 10 seconds.
-* The foot of each board shows when MyAirports collected the data ("Flight data from
-  14:25"). It can be older than the update time, because MyAirports caches its data.
 * Coloured keys: red = the other board for that airport, green/yellow = next/previous
   airport, cyan = index.
-* **Setup:** sign up at MyAirports and create an API key (it starts `ma_live_`) in the
-  developer dashboard. Put it in `ttxflights.cfg` as `apikey=`, and set `pagesdir=`
-  as for ttxfeed. Run it on the same machine as the server.
-* **Daily limit:** a free account allows 100 requests a day. Each update costs one request
-  per board, so 4 airports use 8. ttxflights keeps count in `ttxflights.state`, which
-  survives restarts. It spreads its updates to stay under `budget=` (default 95), only
-  between the hours in `hours=` (default 6-23). With 4 airports that is roughly every
-  2 hours. Fewer airports or a shorter day means more frequent updates.
-* Add or change airports with `airport=CODE,NAME,page` (the arrivals page; departures go
-  on the next page). Use the 3-letter IATA airport code.
+* Run it on the same machine as the server, with `pagesdir=` pointing at the server's
+  `pages` folder (as for ttxfeed).
+
+### Using FlightAware AeroAPI (`ttxflights.cfg`, the default)
+
+1. Sign up for a **Personal** AeroAPI account on flightaware.com and create an API key.
+   The Personal tier includes $5 of free queries a month, or $10 for ADS-B feeders.
+   Personal use only.
+2. Put the key in `ttxflights.cfg` as `apikey=`.
+3. In the AeroAPI portal, look up the price per result set for
+   `/airports/{id}/flights/scheduled_arrivals` and `scheduled_departures`, and set
+   `pageprice=` to it. Set `monthlybudget=` a little under your free allowance.
+4. Airports use 4-letter ICAO codes: EGHI Southampton, EGGD Bristol, EGLL Heathrow,
+   EGKK Gatwick.
+
+ttxflights keeps a running total of what it has spent this month in `ttxflights.state`,
+which survives restarts. It never starts an update that could take it over
+`monthlybudget=`, and it spaces updates through `hours=` to spread the money across the
+month. The console shows the cost per update and the resulting update interval when it
+starts. To update more often, use fewer airports or a shorter day. Requests are spaced
+`gap=7` seconds apart to stay inside the Personal tier's limit of 10 result sets a minute.
+`maxpages=1` gives up to 15 flights per board; 2 gives 30 but costs twice as much.
+
+### Using MyAirports (`ttxflights-myairports.cfg`)
+
+Copy it over `ttxflights.cfg` to use MyAirports instead. It uses a free key from
+myairports.online, IATA codes (SOU, BRS, LHR, LGW) and a budget of requests per day
+(`budget=95` for the free 100 a day). At the time of writing, MyAirports' Cloudflare
+protection was blocking API requests that come from programs, so it may not work.
+
+### Other APIs and troubleshooting
+
 * Each raw reply is saved as `last_<code>_<type>.json`. If a board stays empty, or the
-  console says "none usable", send that file to whoever is maintaining the program so
-  the field names can be matched.
-* The key is sent in an `X-API-Key` header, as MyAirports asks. For a different API, add
-  `header=` lines (they replace the default), or put `{key}` in the `url=` line.
+  console says "none usable", that file shows what the API sent.
+* `url=` takes `{code}`, `{type}` (arrivals/departures), `{pages}` and `{key}`.
+  `header=` lines set the HTTP headers (`{key}` is replaced with your key). The program
+  reads most JSON flight lists and finds the usual field names by itself.
 
 ## Client keys
 
