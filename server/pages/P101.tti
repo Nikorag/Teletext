@@ -1,0 +1,21 @@
+DE,Demo page created by ttxserver
+CT,8,T
+PN,10100
+SC,0000
+PS,8000
+OL,1,D]MCColours and effects
+OL,4,ARed              A]G White on red
+OL,5,BGreen            B]D Blue on green
+OL,6,CYellow           C]A Red on yellow
+OL,7,DBlue             D]C Yellow on blue
+OL,8,EMagenta          E]G White on magenta
+OL,9,FCyan             F]D Blue on cyan
+OL,10,GWhite            G]D Blue on white
+OL,12,GThis HCflashesIGand this does not
+OL,14,MFDouble height text
+OL,17,GQuiz: when did BBC CEEFAX begin?
+OL,18,GAnswer:BX1974
+OL,19,CPress R to reveal the answer
+OL,21,GSpecials: # [ \ ] ^ _ ` { | } ~
+OL,24,AIndex    BGraphics CCarousel  FHelp
+FL,100,102,103,104,8FF,100

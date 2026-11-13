@@ -1,0 +1,18 @@
+DE,Demo page created by ttxserver
+CT,8,T
+PN,10000
+SC,0000
+PS,8000
+OL,1,D]MCTELETEXT  SERVER
+OL,3,FWelcome to your own teletext service
+OL,5,T,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+OL,7,GColours, flash and concealC        101
+OL,9,GMosaic graphicsC                   102
+OL,11,GRotating pages (carousel)C         103
+OL,13,GAdding your own pagesC             104
+OL,15,GKeys for the clientC               105
+OL,19,T,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+OL,21,BType a page number, click one, or use
+OL,22,Bthe coloured keys F1 F2 F3 F4
+OL,24,AColours  BGraphics CCarousel  FHelp
+FL,101,102,103,104,8FF,100

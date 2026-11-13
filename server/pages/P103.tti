@@ -1,0 +1,36 @@
+DE,Demo page created by ttxserver
+CT,6,T
+PN,10301
+SC,0001
+PS,8000
+OL,1,D]MCDid you know?
+OL,4,GPage 1 of 3 - changes every 6 secs
+OL,8,FCEEFAX, the BBC teletext service,
+OL,10,Fbegan in 1974 and closed in 2012.
+OL,12,F
+OL,20,CLeft/Right arrows step subpages.
+OL,21,CH holds the page on screen.
+OL,24,AIndex    BColours  CGraphics  FHelp
+PN,10302
+SC,0002
+PS,8000
+OL,1,D]MCDid you know?
+OL,4,GPage 2 of 3 - changes every 6 secs
+OL,8,FA teletext page is 40 characters
+OL,10,Fwide and 24 rows deep, plus the
+OL,12,Fheader row at the top.
+OL,20,CLeft/Right arrows step subpages.
+OL,21,CH holds the page on screen.
+OL,24,AIndex    BColours  CGraphics  FHelp
+PN,10303
+SC,0003
+PS,8000
+OL,1,D]MCDid you know?
+OL,4,GPage 3 of 3 - changes every 6 secs
+OL,8,FPages were sent in spare lines of
+OL,10,Fthe TV picture, in the vertical
+OL,12,Fblanking interval.
+OL,20,CLeft/Right arrows step subpages.
+OL,21,CH holds the page on screen.
+OL,24,AIndex    BColours  CGraphics  FHelp
+FL,100,101,102,104,8FF,100

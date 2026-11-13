@@ -1,0 +1,21 @@
+DE,Demo page created by ttxserver
+CT,8,T
+PN,10400
+SC,0000
+PS,8000
+OL,1,D]MCAdding your own pages
+OL,4,GPut .tti files in the server's
+OL,5,Gpages folder, then press R in the
+OL,6,Gserver window to reload them.
+OL,8,FPN,20000      page 200
+OL,9,FPN,20001      next subpage of 200
+OL,10,FOL,5,Hello    text on row 5
+OL,11,FCT,8,T        8 secs per subpage
+OL,12,FFL,100,...    fastext links
+OL,14,GControl codes are written as ESC
+OL,15,Gfollowed by (code + 40 hex).
+OL,17,GEasiest: use a teletext editor
+OL,18,Gthat saves .tti files, or edit the
+OL,19,Gdemo files the server created.
+OL,24,AIndex    BColours  CGraphics  FKeys
+FL,100,101,102,105,8FF,100

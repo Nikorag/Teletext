@@ -1,0 +1,18 @@
+DE,Demo page created by ttxserver
+CT,8,T
+PN,10500
+SC,0000
+PS,8000
+OL,1,D]MCKeys for the client
+OL,4,C0-9      Gtype a page number
+OL,5,CUp/Down  Gnext / previous page
+OL,6,CLft/Rgt  Gprevious / next subpage
+OL,7,CF1-F4    Gred green yellow cyan
+OL,8,CF5 or I  Gindex page
+OL,9,CR        Greveal concealed text
+OL,10,CH        Ghold (stop page changing)
+OL,11,CEsc      Gcancel page entry
+OL,12,CMouse    Gclick a page number or
+OL,13,C         Ga coloured fastext link
+OL,24,AIndex    BColours  CGraphics  FHelp
+FL,100,101,102,104,8FF,100
