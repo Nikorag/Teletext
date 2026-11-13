@@ -33,6 +33,8 @@ clients (on the same PC or across the LAN) connect to it and browse them like a 
 | `feed\ttxfeed.cpp` | News feed program: turns RSS feeds (e.g. BBC News) into pages |
 | `feed\ttxfeed.cfg` | Feed settings: which feeds go on which pages |
 | `flights\ttxflights.cpp` | Airport arrivals/departures boards from a flight-data API |
+| `weather\ttxweather.cpp` | Weather pages from Open-Meteo (free, no key) |
+| `weather\ttxweather.cfg` | Weather settings: places and update interval |
 | `flights\ttxflights.cfg` | Flights settings: API key, airports, daily request budget |
 | `docs\` | Screenshots |
 
@@ -109,6 +111,7 @@ sudo apt install g++ curl
 cd ~/teletext/server && g++ -O2 -o ttxserver ttxserver.cpp
 cd ~/teletext/feed   && g++ -O2 -o ttxfeed   ttxfeed.cpp
 cd ~/teletext/flights && g++ -O2 -o ttxflights ttxflights.cpp
+cd ~/teletext/weather && g++ -O2 -o ttxweather ttxweather.cpp
 ```
 
 **3. Settings.** In `~/teletext/server/ttxserver.cfg`:
@@ -198,6 +201,32 @@ time):
 * The feeds carry headlines and a one-line summary only. The full stories are on the BBC
   website. The pages say "Source: BBC News". This is fine for personal use at home, but
   don't republish the pages publicly.
+
+## Weather (ttxweather)
+
+`ttxweather` builds Ceefax-style weather pages from **Open-Meteo**, which is free for
+non-commercial use and needs no key or sign-up:
+
+| Page | Contents |
+|---|---|
+| 400 | Weather index: every place with its temperature and conditions |
+| 401-409 | One page per place |
+
+Each place's page has:
+* current temperature, conditions, wind and humidity
+* a mosaic weather symbol (sun, sun and cloud, cloud, fog, rain, snow, thunder)
+* a 5-day forecast with highs, lows and chance of rain
+* today's sunrise and sunset times
+
+Places are set in `ttxweather.cfg` as `place=NAME,latitude,longitude,page`. To find a
+place's latitude and longitude, right-click it in Google Maps. It updates every 30
+minutes (`interval=`), one request per place, well inside Open-Meteo's fair-use limit.
+Every page carries the "Weather data by Open-Meteo.com" credit that their licence
+(CC BY 4.0) asks for.
+
+Run it like the other feeds: on the server machine, with `pagesdir=` pointing at the
+server's `pages` folder. On the Pi, copy the `weather` folder next to `server`, build it,
+and make a `ttxweather` service the same way as for the others.
 
 ## Airport arrivals and departures (ttxflights)
 
