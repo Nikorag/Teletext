@@ -15,6 +15,8 @@
  *     interval=10                     minutes between updates
  *     source=BBC News                 shown at the foot of each page
  *     indexpage=100                   where the cyan Fastext key goes
+ *     breakingpage=190                breaking news page (0 = none): the newest
+ *     breakingminutes=60              story, flashing, if it is this recent
  *     feed=110,TOP STORIES,https://feeds.bbci.co.uk/news/rss.xml
  *     feed=120,UK NEWS,https://feeds.bbci.co.uk/news/uk/rss.xml
  *     ...      (page,title,url - the page should end in 0, e.g. 110 120 300)
@@ -56,6 +58,7 @@
 #define A_CYAN    "\x06"
 #define A_WHITE   "\x07"
 #define DOUBLE_HEIGHT "\x0D"
+#define FLASH     "\x08"
 #define NEW_BG    "\x1D"
 
 struct Feed { int page; std::string title, url; };
@@ -67,6 +70,12 @@ static std::string g_pagesDir  = "../server/pages";
 static std::string g_source    = "BBC News";
 static int         g_interval  = 10;
 static int         g_indexPage = 0x100;
+static int         g_breakingPage = 0x190;     /* 0 = no breaking news page   */
+static int         g_breakingMins = 60;        /* how new counts as breaking  */
+
+/* every story from this update, with the page it is on, for breaking news */
+struct Latest { std::string title, desc, date; int page; int feedPage; };
+static std::vector<Latest> g_latest;
 
 /* ------------------------------------------------------------------ */
 /*  Windows / Linux differences                                        */
@@ -149,6 +158,8 @@ static void LoadConfig()
             else if (!_stricmp(key, "source"))    g_source = val;
             else if (!_stricmp(key, "interval"))  g_interval = atoi(val);
             else if (!_stricmp(key, "indexpage")) g_indexPage = (int)strtol(val, NULL, 16);
+            else if (!_stricmp(key, "breakingpage")) g_breakingPage = (int)strtol(val, NULL, 16);
+            else if (!_stricmp(key, "breakingminutes")) g_breakingMins = atoi(val);
             else if (!_stricmp(key, "feed")) {
                 /* page,title,url */
                 std::string v(val);
@@ -375,6 +386,35 @@ static void ParseRss(const std::string &xml, std::vector<Item> &items, size_t ma
 }
 
 /* "Fri, 13 Nov 2026 12:05:23 GMT" -> "12:05 13 Nov" */
+static long DaysFromCivil(int y, int m, int d)
+{
+    y -= m <= 2;
+    long era = (y >= 0 ? y : y - 399) / 400;
+    long yoe = y - era * 400;
+    long doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + doe - 719468;
+}
+
+/* "Fri, 13 Nov 2026 12:05:23 GMT" (or +0100) -> time_t, 0 if not understood */
+static time_t RssTime(const std::string &d)
+{
+    static const char *mons = "JanFebMarAprMayJunJulAugSepOctNovDec";
+    int day = 0, year = 0, hh = 0, mm = 0, ss = 0;
+    char mon[8] = "", zone[16] = "";
+    int got = sscanf(d.c_str(), "%*3s, %d %3s %d %d:%d:%d %15s", &day, mon, &year, &hh, &mm, &ss, zone);
+    if (got < 5) return 0;
+    const char *m = strstr(mons, mon);
+    if (!m || !mon[0]) return 0;
+    int month = (int)(m - mons) / 3 + 1;
+    long off = 0;
+    if (zone[0] == '+' || zone[0] == '-') {
+        int z = atoi(zone + 1);
+        off = ((z / 100) * 60 + z % 100) * 60L * (zone[0] == '-' ? -1 : 1);
+    }
+    return (time_t)(DaysFromCivil(year, month, day) * 86400L + hh * 3600L + mm * 60L + ss - off);
+}
+
 static std::string ShortDate(const std::string &d)
 {
     int day = 0, year = 0, hh = 0, mm = 0;
@@ -602,15 +642,77 @@ static void UpdateFeed(size_t fi)
     for (size_t i = items.size(); i < 9; i++)
         remove(PagePath(f.page + 1 + (int)i).c_str());
 
+    for (size_t i = 0; i < items.size(); i++) {
+        Latest l;
+        l.title = items[i].title;
+        l.desc = items[i].desc;
+        l.date = items[i].date;
+        l.page = f.page + 1 + (int)i;
+        l.feedPage = f.page;
+        g_latest.push_back(l);
+    }
     printf("%2d stories, %d page(s) updated\n", (int)items.size(), changed);
+}
+
+/* Breaking news: the newest story from any feed, if it is recent enough */
+static void UpdateBreaking()
+{
+    if (!g_breakingPage || g_latest.empty()) return;
+    size_t best = 0;
+    time_t bestT = 0;
+    for (size_t i = 0; i < g_latest.size(); i++) {
+        time_t t = RssTime(g_latest[i].date);
+        if (t > bestT) { bestT = t; best = i; }
+    }
+    const Latest &l = g_latest[best];
+    long age = bestT ? (long)(time(NULL) - bestT) : 1000000L;
+    bool breaking = bestT && age >= -600 && age <= g_breakingMins * 60L;
+
+    Page p;
+    Blank(p);
+    if (breaking) {
+        /* red band, flashing white double-height letters */
+        Put(p, 1, 0, A_RED NEW_BG DOUBLE_HEIGHT A_WHITE FLASH);
+        Put(p, 1, 9, "BREAKING NEWS");
+        std::string when = ShortDate(l.date);
+        if (!when.empty()) Put(p, 4, 0, A_YELLOW + when);
+        std::vector<std::string> h = Wrap(l.title, 38);
+        int row = 6;
+        for (size_t k = 0; k < h.size() && row <= 12; k++, row += 2)
+            Put(p, row, 0, DOUBLE_HEIGHT A_WHITE + h[k]);
+        row++;
+        std::vector<std::string> d = Wrap(l.desc, 39);
+        for (size_t k = 0; k < d.size() && row <= 20; k++) Put(p, row++, 0, A_CYAN + d[k]);
+        Put(p, 21, 0, A_YELLOW "Full story on page " + Hex3(l.page));
+    } else {
+        Put(p, 1, 0, A_BLUE NEW_BG DOUBLE_HEIGHT A_YELLOW);
+        Put(p, 1, 5, "NEWSFLASH");
+        Put(p, 5, 0, A_WHITE "No breaking news at the moment.");
+        std::string when = ShortDate(l.date);
+        Put(p, 8, 0, A_CYAN "Latest headline" + (when.empty() ? std::string(":") : " (" + when + "):"));
+        std::vector<std::string> h = Wrap(l.title, 39);
+        int row = 10;
+        for (size_t k = 0; k < h.size() && row <= 13; k++) Put(p, row++, 0, A_YELLOW + h[k]);
+        Put(p, row + 1, 0, A_WHITE "Full story on page " + Hex3(l.page));
+    }
+    Put(p, 23, 0, A_GREEN "Source: " + g_source);
+    Put(p, 24, 0, A_RED "Full story  " A_GREEN "Headlines  " A_CYAN "Index");
+    int links[5] = { l.page, l.feedPage, 0, g_indexPage, g_indexPage };
+    bool changed = WriteIfChanged(g_breakingPage,
+                                  MakeTTI(p, g_breakingPage, "Breaking news", links));
+    printf("%03X %-14s %s%s\n", g_breakingPage, "BREAKING NEWS",
+           breaking ? l.title.substr(0, 40).c_str() : "(nothing new in the last hour)",
+           changed ? ", page updated" : "");
 }
 
 static void UpdateAll()
 {
+    g_latest.clear();
     time_t t = time(NULL);
     struct tm *tm = localtime(&t);
     printf("\n--- Updating at %02d:%02d ---\n", tm->tm_hour, tm->tm_min);
     for (size_t i = 0; i < g_feeds.size(); i++) UpdateFeed(i);
+    UpdateBreaking();
     printf("Next update in %d minutes.  U = update now, Q = quit\n", g_interval);
 }
 
