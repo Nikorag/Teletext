@@ -30,7 +30,7 @@ clients (on the same PC or across the LAN) connect to it and browse them like a 
 | `editor\ttxedit.cfg` | Editor settings: `pagesdir=` (the folder Open/Save start in), `server=`, `password=` |
 | `client\ttxclient.cfg` | Client settings: host, port, start page, scaling |
 | `server\ttxserver.cfg` | Server settings: port, service name, edit password, web port |
-| `server\web\` | The browser/phone client served by ttxserver (index.html, manifest, icons) |
+| `server\web\` | The browser/phone client served by ttxserver (index.html, sw.js, manifest, icons) |
 | `feed\ttxfeed.cpp` | News feed program: turns RSS feeds (e.g. BBC News) into pages |
 | `feed\ttxfeed.cfg` | Feed settings: which feeds go on which pages |
 | `flights\ttxflights.cpp` | Airport arrivals/departures boards from a flight-data API |
@@ -315,9 +315,8 @@ flashing text, subpages and the newsflash strip, and it updates once a second.
   in the Windows client.
 * **Smooth** switches between soft, TV-like scaling and sharp pixels.
 * Turn a phone on its side for a bigger picture, with the buttons alongside.
-* **Make it an app:** in Chrome on Android, tap the menu (three dots), then **Add to Home
-  screen**. It gets a Teletext icon and opens full screen. The page you were on is
-  remembered.
+* **Make it an app:** see *Installing it as an app (PWA)* below. Even over plain http,
+  Chrome's menu › **Add to Home screen** gives a home-screen shortcut.
 * When a newsflash arrives, the phone vibrates (Android) and a *Dismiss newsflash* button
   appears.
 
@@ -326,6 +325,39 @@ the `web` folder along with the server. `webport=` in `ttxserver.cfg` changes th
 `webport=0` turns it off. Open the port in the firewall if you use one
 (`sudo ufw allow 8080/tcp` on the Pi; Windows asks the first time). The web client only
 views pages. Editing still needs `ttxedit` and the password.
+
+### Installing it as an app (PWA)
+
+The web client is a Progressive Web App. It has a manifest, icons including an Android
+"maskable" one, and a service worker (`web/sw.js`) that keeps a copy of the app so it
+opens instantly, even when the server can't be reached. Page data is always live. When
+Chrome offers to install it, an **Install** button appears among the controls.
+
+Browsers only allow this over **HTTPS**, so it needs a proper web address rather than
+`http://192.168.x.x:8080`. The easy way is a Cloudflare tunnel, if you run one on the
+same machine:
+
+1. **Add a public hostname to the tunnel**, e.g. `teletext.yourdomain.co.uk` →
+   `http://localhost:8080`.
+   * Tunnel managed in the Cloudflare dashboard: Zero Trust › Networks › Tunnels › your
+     tunnel › Public Hostname › Add. Enter subdomain `teletext`, your domain, and
+     service type `HTTP` with URL `localhost:8080`.
+   * Tunnel managed by a `config.yml` file: add these lines above the final catch-all
+     rule, then run `cloudflared tunnel route dns <tunnel-name> teletext.yourdomain.co.uk`
+     and `sudo systemctl restart cloudflared`:
+     ```
+       - hostname: teletext.yourdomain.co.uk
+         service: http://localhost:8080
+     ```
+2. **Restrict it to yourself (recommended):** Zero Trust › Access › Applications › Add
+   an application › Self-hosted, for `teletext.yourdomain.co.uk`, with a policy that
+   allows only your own email address. You log in once on each phone. This keeps your
+   pages private and keeps licensed data (FlightAware) to personal use.
+3. On the phone, open `https://teletext.yourdomain.co.uk` in Chrome, then tap **Install**
+   on the page, or ⋮ › **Install app**.
+
+Only the read-only web port goes through the tunnel. Editing (port 8023) stays on your
+home network.
 
 ## Client keys
 

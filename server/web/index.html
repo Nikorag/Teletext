@@ -68,6 +68,7 @@
     <button id="subprev" class="small">&#9664; Sub</button>
     <button id="subnext" class="small">Sub &#9654;</button>
     <button id="smooth" class="small on">Smooth</button>
+    <button id="install" class="small" style="display:none">Install</button>
   </div>
   <div id="status"></div>
 </div>
@@ -513,6 +514,26 @@ setInterval(poll, 1000);
 updateButtons();
 render();
 poll();
+
+// ---- install as an app (PWA) ----
+if ("serviceWorker" in navigator && window.isSecureContext)
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+let installPrompt = null;
+window.addEventListener("beforeinstallprompt", e => {
+  e.preventDefault();
+  installPrompt = e;
+  document.getElementById("install").style.display = "";
+});
+document.getElementById("install").onclick = async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  await installPrompt.userChoice;
+  installPrompt = null;
+  document.getElementById("install").style.display = "none";
+};
+window.addEventListener("appinstalled", () => {
+  document.getElementById("install").style.display = "none";
+});
 </script>
 </body>
 </html>
