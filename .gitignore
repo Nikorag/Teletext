@@ -4,3 +4,5 @@
 ~P*.tmp
 *.layout
 Makefile.win
+epg.xml
+epg.xml.part

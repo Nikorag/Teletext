@@ -34,6 +34,8 @@ clients (on the same PC or across the LAN) connect to it and browse them like a 
 | `feed\ttxfeed.cpp` | News feed program: turns RSS feeds (e.g. BBC News) into pages |
 | `feed\ttxfeed.cfg` | Feed settings: which feeds go on which pages |
 | `flights\ttxflights.cpp` | Airport arrivals/departures boards from a flight-data API |
+| `tv\ttxtv.cpp` | TV listings pages from Freeview-EPG |
+| `tv\ttxtv.cfg` | TV settings: channels, regions, pages |
 | `weather\ttxweather.cpp` | Weather pages from Open-Meteo (free, no key) |
 | `weather\ttxweather.cfg` | Weather settings: places and update interval |
 | `flights\ttxflights.cfg` | Flights settings: API key, airports, daily request budget |
@@ -113,6 +115,7 @@ cd ~/teletext/server && g++ -O2 -o ttxserver ttxserver.cpp
 cd ~/teletext/feed   && g++ -O2 -o ttxfeed   ttxfeed.cpp
 cd ~/teletext/flights && g++ -O2 -o ttxflights ttxflights.cpp
 cd ~/teletext/weather && g++ -O2 -o ttxweather ttxweather.cpp
+cd ~/teletext/tv      && g++ -O2 -o ttxtv ttxtv.cpp
 ```
 
 **3. Settings.** In `~/teletext/server/ttxserver.cfg`:
@@ -213,6 +216,33 @@ time):
 * The feeds carry headlines and a one-line summary only. The full stories are on the BBC
   website. The pages say "Source: BBC News". This is fine for personal use at home, but
   don't republish the pages publicly.
+
+## TV listings (ttxtv)
+
+![TV listings](docs/screenshots-tv.png)
+
+`ttxtv` builds Ceefax-style TV listings from **Freeview-EPG**, an open-source project
+that publishes free listings for every UK Freeview channel (for personal use) as an
+XMLTV file on GitHub. No key or sign-up is needed.
+
+| Page | Contents |
+|---|---|
+| 600 | TV Now and Next: every channel's current programme, and what's next with its start time |
+| 601-609 | One page per channel: listings from now, with the programme on now in yellow and a heading at each new day. They rotate through up to 3 subpages, into tomorrow |
+
+* Coloured keys: red/green = next/previous channel, yellow = Now and Next, cyan = index.
+* It downloads the listings (about 22 MB) every 4 hours (`download=240`). The source is
+  regenerated every 8 hours. It rebuilds the pages from the saved copy (`epg.xml`, kept
+  next to the program) every 5 minutes, so "now" moves along. After a restart it reuses
+  a recent saved copy instead of downloading again.
+* **Channels and regions** are `channel=id,NAME,page` lines in `ttxtv.cfg`. The defaults
+  use the South region (BBC One South, ITV1 Meridian South, Channel 4 South). For your own
+  region, swap in e.g. `BBCOneLondonHD.uk` / `ITV1London.uk`, `BBCOneWest.uk` /
+  `ITV1West.uk`, `BBCOneNorthWest.uk` / `ITV1Granada.uk`, `BBCOneScotHD.uk`,
+  `BBCOneWalesHD.uk` / `ITV1Wales.uk`. The console warns about any id with no programmes.
+  The full list of ids is the `<channel id="...">` lines at the top of `epg.xml`.
+* Run it on the server machine, like the other feeds, and make a `ttxtv` service the same
+  way.
 
 ## Weather (ttxweather)
 
