@@ -16,8 +16,11 @@
                font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
   body { display: flex; flex-direction: column; align-items: center;
          padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); box-sizing: border-box; }
-  #tv { width: 100%; max-width: 1000px; aspect-ratio: 4 / 3; background: #000; touch-action: pan-y; }
-  #tv canvas { width: 100%; height: 100%; display: block; }
+  /* portrait (phones): picture on top, as wide as fits while leaving room for the buttons */
+  #tv { width: min(100vw, calc((100vh - 400px) * 4 / 3)); width: min(100vw, calc((100dvh - 400px) * 4 / 3));
+        min-width: 240px; aspect-ratio: 4 / 3; background: #000; touch-action: pan-y; flex: none; }
+  #tv { position: relative; overflow: hidden; }
+  #tv canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
   #tv.sharp canvas { image-rendering: pixelated; }
   .pad { width: 100%; max-width: 520px; padding: 6px 10px; box-sizing: border-box; display: grid; gap: 8px; }
   .fast { grid-template-columns: repeat(4, 1fr); }
@@ -34,10 +37,11 @@
   #flashbar { display: none; width: 100%; max-width: 520px; padding: 0 10px; box-sizing: border-box; }
   #flashbar button { width: 100%; height: 40px; font-size: 15px; background: #600; border-color: #a00; }
   #status { font-size: 13px; color: #777; text-align: center; padding: 4px 10px 10px; min-height: 18px; }
-  @media (min-aspect-ratio: 4/3) and (max-height: 600px) {      /* phone on its side */
-    body { flex-direction: row; justify-content: center; }
-    #tv { height: 100vh; width: auto; }
-    #side { display: flex; flex-direction: column; justify-content: center; max-width: 360px; }
+  /* wide screens (PCs, tablets and phones on their side): buttons beside the picture */
+  @media (min-aspect-ratio: 1/1) {
+    body { flex-direction: row; justify-content: center; align-items: center; height: 100vh; height: 100dvh; }
+    #tv { width: min(calc(100vw - 360px), calc(100vh * 4 / 3)); width: min(calc(100vw - 360px), calc(100dvh * 4 / 3)); }
+    #side { display: flex; flex-direction: column; justify-content: center; width: 340px; flex: none; }
   }
 </style>
 </head>
