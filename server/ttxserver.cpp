@@ -13,11 +13,16 @@
  *  - ttxedit can list, open, save and delete pages over the network.
  *    Set password= in ttxserver.cfg so only you can change pages.
  *
+ * Phones and other browsers: http://<server>:8080  (webport= in the cfg;
+ * the page itself is web/index.html next to the server)
+ *
  * Usage:   ttxserver [port] [service-name]
  * ttxserver.cfg (optional, in the folder you run it from):
  *          port=8023
  *          name=TELETEXT
  *          password=secret        (needed by ttxedit to save/delete)
+ *          webport=8080           browser client port (0 = off)
+ *          webdir=web             folder holding index.html etc.
  * Console: R = reload  L = list clients  P = list pages  Q = quit
  *          (on Linux type the letter and press Enter)
  *
@@ -72,6 +77,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <ctype.h>
 #include <string>
 #include <vector>
 #include <map>
@@ -156,6 +162,12 @@ static std::string          g_serviceName = "TELETEXT";
 static std::string          g_password;
 static std::string          g_signature;
 static std::string          g_flash;          /* current newsflash "ppp headline", or "" */
+
+/* the web (browser) client: a small HTTP server on its own port */
+struct HttpConn { SOCKET sock; std::string buf; time_t opened; bool dead; };
+static std::vector<HttpConn> g_http;
+static int                   g_webPort = 8080;     /* 0 = off */
+static std::string           g_webDir  = "web";
 
 static void ClearSub(SubPage &s) { memset(s.cell, ' ', sizeof(s.cell)); }
 
@@ -815,6 +827,151 @@ static void CheckFlash()
         if (g_clients[i].page) SendFlash(g_clients[i]);
 }
 
+/* ------------------------------------------------------------------ */
+/*  Web client                                                         */
+/*    GET /                    -> web/index.html                       */
+/*    GET /<file>              -> web/<file>  (manifest, icons)        */
+/*    GET /api/page?p=100&s=0  -> the page as JSON (s = fixed subpage) */
+/* ------------------------------------------------------------------ */
+
+static void HttpReply(HttpConn &h, const char *status, const char *type, const std::string &body)
+{
+    char head[256];
+    sprintf(head, "HTTP/1.1 %s\r\nContent-Type: %s\r\nContent-Length: %d\r\n"
+                  "Cache-Control: no-store\r\nConnection: close\r\n\r\n",
+            status, type, (int)body.size());
+    std::string all = std::string(head) + body;
+    const char *data = all.data();
+    int len = (int)all.size();
+    while (len > 0) {
+        int n = send(h.sock, data, len, SEND_FLAGS);
+        if (n <= 0) break;
+        data += n; len -= n;
+    }
+    h.dead = true;
+}
+
+static std::string Hex(const unsigned char *p, int n)
+{
+    static const char *d = "0123456789abcdef";
+    std::string s;
+    for (int i = 0; i < n; i++) { s += d[(p[i] >> 4) & 15]; s += d[p[i] & 15]; }
+    return s;
+}
+
+static std::string JsonText(const std::string &t)
+{
+    std::string r = "\"";
+    for (size_t i = 0; i < t.size(); i++) {
+        char c = t[i];
+        if (c == '"' || c == '\\') { r += '\\'; r += c; }
+        else if ((unsigned char)c >= 0x20 && (unsigned char)c < 0x7F) r += c;
+    }
+    return r + "\"";
+}
+
+static std::string QueryValue(const std::string &q, const char *name)
+{
+    std::string key = std::string(name) + "=";
+    size_t p = 0;
+    while (p < q.size()) {
+        size_t e = q.find('&', p);
+        if (e == std::string::npos) e = q.size();
+        if (q.compare(p, key.size(), key) == 0) return q.substr(p + key.size(), e - p - key.size());
+        p = e + 1;
+    }
+    return "";
+}
+
+static std::string PageJson(int pageNum, int fixedSub)
+{
+    char b[96];
+    std::string j = "{";
+    unsigned char row0[TTX_COLS];
+    MakeHeader(pageNum, row0);
+    std::map<int, Page>::iterator it = g_pages.find(pageNum);
+    if (it == g_pages.end()) {
+        sprintf(b, "\"found\":false,\"page\":\"%03X\",", pageNum & 0xFFF);
+        j += b;
+        j += "\"header\":\"" + Hex(row0, TTX_COLS) + "\"";
+    } else {
+        Page &p = it->second;
+        int si = p.current;
+        if (fixedSub > 0 && fixedSub <= (int)p.subs.size()) si = fixedSub - 1;
+        sprintf(b, "\"found\":true,\"page\":\"%03X\",\"sub\":%d,\"count\":%d,",
+                p.number, si + 1, (int)p.subs.size());
+        j += b;
+        sprintf(b, "\"links\":[\"%03X\",\"%03X\",\"%03X\",\"%03X\",\"%03X\"],",
+                p.links[0], p.links[1], p.links[2], p.links[3], p.links[5] ? p.links[5] : 0x100);
+        j += b;
+        std::string rows = Hex(row0, TTX_COLS);
+        for (int r = 1; r < TTX_ROWS; r++) rows += Hex(p.subs[si].cell[r], TTX_COLS);
+        j += "\"rows\":\"" + rows + "\"";
+    }
+    if (!g_flash.empty() && g_flash.size() > 4) {
+        j += ",\"flash\":{\"page\":\"" + g_flash.substr(0, 3) + "\",\"text\":" +
+             JsonText(g_flash.substr(4)) + "}";
+    }
+    return j + "}";
+}
+
+static const char *ContentType(const std::string &name)
+{
+    size_t dot = name.rfind('.');
+    std::string ext = dot == std::string::npos ? "" : name.substr(dot + 1);
+    if (ext == "html" || ext == "htm") return "text/html; charset=utf-8";
+    if (ext == "js")   return "text/javascript";
+    if (ext == "css")  return "text/css";
+    if (ext == "json" || ext == "webmanifest") return "application/manifest+json";
+    if (ext == "png")  return "image/png";
+    if (ext == "svg")  return "image/svg+xml";
+    if (ext == "ico")  return "image/x-icon";
+    return "application/octet-stream";
+}
+
+static void HandleHttp(HttpConn &h)
+{
+    size_t sp1 = h.buf.find(' '), sp2 = h.buf.find(' ', sp1 + 1);
+    if (sp1 == std::string::npos || sp2 == std::string::npos) { h.dead = true; return; }
+    std::string method = h.buf.substr(0, sp1);
+    std::string target = h.buf.substr(sp1 + 1, sp2 - sp1 - 1);
+    if (method != "GET") { HttpReply(h, "405 Method Not Allowed", "text/plain", "GET only\n"); return; }
+
+    std::string path = target, query;
+    size_t q = target.find('?');
+    if (q != std::string::npos) { path = target.substr(0, q); query = target.substr(q + 1); }
+
+    if (path == "/api/page") {
+        int page = (int)strtol(QueryValue(query, "p").c_str(), NULL, 16);
+        int sub = atoi(QueryValue(query, "s").c_str());
+        if (page < 0x100 || page > 0x8FF) page = 0x100;
+        HttpReply(h, "200 OK", "application/json", PageJson(page, sub));
+        return;
+    }
+
+    /* static files from the web folder - plain names only, nothing outside it */
+    std::string name = path == "/" ? "index.html" : path.substr(1);
+    bool ok = !name.empty() && name[0] != '.';
+    for (size_t i = 0; i < name.size() && ok; i++) {
+        char c = name[i];
+        ok = isalnum((unsigned char)c) || c == '.' || c == '-' || c == '_';
+    }
+    if (ok) {
+        std::string file = g_webDir + "/" + name;
+        FILE *f = fopen(file.c_str(), "rb");
+        if (f) {
+            std::string body;
+            char b[8192];
+            size_t n;
+            while ((n = fread(b, 1, sizeof(b), f)) > 0) body.append(b, n);
+            fclose(f);
+            HttpReply(h, "200 OK", ContentType(name), body);
+            return;
+        }
+    }
+    HttpReply(h, "404 Not Found", "text/plain", "Not found\n");
+}
+
 static bool MayEdit(Client &c)
 {
     return g_password.empty() || c.authed;
@@ -959,6 +1116,8 @@ static void LoadConfig(int &port)
         if (!strcmp(line, "port"))          port = atoi(eq + 1);
         else if (!strcmp(line, "name"))     g_serviceName = eq + 1;
         else if (!strcmp(line, "password")) g_password = eq + 1;
+        else if (!strcmp(line, "webport"))  g_webPort = atoi(eq + 1);
+        else if (!strcmp(line, "webdir"))   g_webDir = eq + 1;
     }
     fclose(f);
 }
@@ -1026,7 +1185,26 @@ int main(int argc, char *argv[])
     }
     listen(listener, SOMAXCONN);
 
+    /* second port for browsers */
+    SOCKET web = INVALID_SOCKET;
+    if (g_webPort > 0) {
+        web = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+#ifndef _WIN32
+        setsockopt(web, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(yes));
+#endif
+        addr.sin_port = htons((unsigned short)g_webPort);
+        if (web == INVALID_SOCKET || bind(web, (sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR) {
+            printf("Cannot use web port %d - browser client is off\n", g_webPort);
+            if (web != INVALID_SOCKET) closesocket(web);
+            web = INVALID_SOCKET;
+        } else {
+            listen(web, SOMAXCONN);
+        }
+    }
+
     printf("=== Teletext server '%s' on port %d ===\n", g_serviceName.c_str(), port);
+    if (web != INVALID_SOCKET)
+        printf("Browser client: http://<this computer's address>:%d\n", g_webPort);
     LoadAllPages();
     g_flash = ReadFlash();
     ShowAddresses(port);
@@ -1046,6 +1224,14 @@ int main(int argc, char *argv[])
         for (size_t i = 0; i < g_clients.size(); i++) {
             FD_SET(g_clients[i].sock, &rd);
             if (g_clients[i].sock > maxfd) maxfd = g_clients[i].sock;
+        }
+        if (web != INVALID_SOCKET) {
+            FD_SET(web, &rd);
+            if (web > maxfd) maxfd = web;
+            for (size_t i = 0; i < g_http.size(); i++) {
+                FD_SET(g_http[i].sock, &rd);
+                if (g_http[i].sock > maxfd) maxfd = g_http[i].sock;
+            }
         }
 
         timeval tv;
@@ -1072,6 +1258,29 @@ int main(int argc, char *argv[])
                     }
                 }
             }
+            /* browser requests */
+            if (web != INVALID_SOCKET && FD_ISSET(web, &rd)) {
+                SOCKET s = accept(web, NULL, NULL);
+                if (s != INVALID_SOCKET) {
+                    if (g_http.size() >= 64) closesocket(s);
+                    else {
+                        HttpConn h;
+                        h.sock = s; h.opened = time(NULL); h.dead = false;
+                        g_http.push_back(h);
+                    }
+                }
+            }
+            for (size_t i = 0; i < g_http.size(); i++) {
+                HttpConn &h = g_http[i];
+                if (h.dead || !FD_ISSET(h.sock, &rd)) continue;
+                char buf[2048];
+                int n = recv(h.sock, buf, sizeof(buf), 0);
+                if (n <= 0) { h.dead = true; continue; }
+                h.buf.append(buf, n);
+                if (h.buf.find("\r\n\r\n") != std::string::npos) HandleHttp(h);
+                else if (h.buf.size() > 8192) h.dead = true;
+            }
+
             /* data from clients */
             for (size_t i = 0; i < g_clients.size(); i++) {
                 Client &c = g_clients[i];
@@ -1102,6 +1311,14 @@ int main(int argc, char *argv[])
                     LoadAllPages();
                 }
                 CheckFlash();
+            }
+        }
+
+        /* finished or stuck browser connections */
+        for (size_t i = g_http.size(); i-- > 0; ) {
+            if (g_http[i].dead || time(NULL) - g_http[i].opened > 10) {
+                closesocket(g_http[i].sock);
+                g_http.erase(g_http.begin() + i);
             }
         }
 
@@ -1141,6 +1358,8 @@ int main(int argc, char *argv[])
     }
 
     for (size_t i = 0; i < g_clients.size(); i++) closesocket(g_clients[i].sock);
+    for (size_t i = 0; i < g_http.size(); i++) closesocket(g_http[i].sock);
+    if (web != INVALID_SOCKET) closesocket(web);
     closesocket(listener);
 #ifdef _WIN32
     WSACleanup();

@@ -29,7 +29,8 @@ clients (on the same PC or across the LAN) connect to it and browse them like a 
 | `editor\saa5050.h` | Same ROM data, for the editor |
 | `editor\ttxedit.cfg` | Editor settings: `pagesdir=` (the folder Open/Save start in), `server=`, `password=` |
 | `client\ttxclient.cfg` | Client settings: host, port, start page, scaling |
-| `server\ttxserver.cfg` | Server settings: port, service name, edit password |
+| `server\ttxserver.cfg` | Server settings: port, service name, edit password, web port |
+| `server\web\` | The browser/phone client served by ttxserver (index.html, manifest, icons) |
 | `feed\ttxfeed.cpp` | News feed program: turns RSS feeds (e.g. BBC News) into pages |
 | `feed\ttxfeed.cfg` | Feed settings: which feeds go on which pages |
 | `flights\ttxflights.cpp` | Airport arrivals/departures boards from a flight-data API |
@@ -296,6 +297,36 @@ protection was blocking API requests that come from programs, so it may not work
   `header=` lines set the HTTP headers (`{key}` is replaced with your key). The program
   reads most JSON flight lists and finds the usual field names by itself.
 
+## Phones, tablets and other browsers
+
+`ttxserver` has a built-in web client. On any phone, tablet or PC on your network, open
+a browser at
+
+    http://<server address>:8080          e.g. http://192.168.1.20:8080
+
+![Browser client on a phone](docs/screenshots-phone.png)
+
+It draws pages with the same SAA5050 lettering as the Windows client, including mosaics,
+flashing text, subpages and the newsflash strip, and it updates once a second.
+
+* **Controls:** the four coloured Fastext buttons, a number pad, previous/next page,
+  Index, Reveal, Hold, and previous/next subpage. **Swipe** the screen left or right to
+  change page, or tap a page number or the newsflash strip. On a PC the keyboard works as
+  in the Windows client.
+* **Smooth** switches between soft, TV-like scaling and sharp pixels.
+* Turn a phone on its side for a bigger picture, with the buttons alongside.
+* **Make it an app:** in Chrome on Android, tap the menu (three dots), then **Add to Home
+  screen**. It gets a Teletext icon and opens full screen. The page you were on is
+  remembered.
+* When a newsflash arrives, the phone vibrates (Android) and a *Dismiss newsflash* button
+  appears.
+
+The page itself is `server/web/index.html` (plus `manifest.json` and two icons), so copy
+the `web` folder along with the server. `webport=` in `ttxserver.cfg` changes the port;
+`webport=0` turns it off. Open the port in the firewall if you use one
+(`sudo ufw allow 8080/tcp` on the Pi; Windows asks the first time). The web client only
+views pages. Editing still needs `ttxedit` and the password.
+
 ## Client keys
 
 | Key | Action |
@@ -411,6 +442,11 @@ Client to server: one command per line, ending in `\n`.
 | `PUTTTI ppp len` + len bytes | Save the .tti text as `pages/Pppp.tti`. Reply `OK ppp` or `ERR ...` |
 | `DELETE ppp` | Delete `pages/Pppp.tti`. Reply `OK ppp` or `ERR ...` |
 | `QUIT` | Disconnect |
+
+The web client uses plain HTTP on the web port: `GET /` serves `web/index.html`, and
+`GET /api/page?p=100&s=0` returns the page as JSON. The JSON holds 25 rows of 40 bytes
+as hex, the subpage, links and any newsflash. `s` is a fixed subpage, or 0 to follow
+the carousel.
 
 Server to client: a text line, then fixed-size binary data.
 
