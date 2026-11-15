@@ -285,7 +285,15 @@ Check raspi-teletext's own README for which Pi models and video settings it supp
   row of every page becomes the NEWSFLASH strip with the headline scrolling past. This
   replaces that page's Fastext labels while the flash is on.
 * Options: `-d pagesdir`, `-n NAME`, `-r packets/sec` to limit the speed (normally the
-  pipe sets the pace), `-c count` to stop after that many packets.
+  pipe sets the pace), `-c count` to stop after that many packets, and `-p page` to
+  dump a page as text (below).
+* **Checking a page without a TV:** `./ttxvbi -d ../server/pages -p 100` prints page 100
+  as it would go on air: the packets are built exactly as for the TV, then decoded again
+  and drawn as a 40 x 25 grid. It shows the header, rows that are blank and so not sent,
+  the Fastext links, the newsflash row if one is on, and whether every Hamming and parity
+  check passed. A carousel page prints each subpage in turn. Exit code 0 means OK, 1 means
+  no such page, 2 means the decode found errors. Colour and graphics control codes show
+  as blank cells, as they do on a real teletext screen.
 * Teletext on air is a one-way broadcast: the TV picks pages out of the cycle, so a page
   takes a moment to appear after you key it in, and more pages make the cycle longer.
 * Linux only. It does not touch DVB (Freeview) teletext, which needs a DVB modulator.

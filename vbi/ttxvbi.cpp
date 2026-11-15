@@ -19,12 +19,15 @@
  *     bottom row of every page while there is breaking news
  *   - pages are reloaded by themselves when the files change
  *
- * Usage:  ttxvbi [-d pagesdir] [-n NAME] [-r packets/sec] [-c count]
+ * Usage:  ttxvbi [-d pagesdir] [-n NAME] [-r packets/sec] [-c count] [-p page]
  *   -d  pages folder (default: ../server/pages, or "pages" if that is missing)
  *   -n  service name in the header (default: name= from ../server/ttxserver.cfg,
  *       else TELETEXT)
  *   -r  limit the speed (default: none - the pipe to raspi-teletext sets the pace)
  *   -c  stop after this many packets (for testing)
+ *   -p  dump a page as text instead of sending packets, e.g. -p 100. The page is
+ *       encoded exactly as it would go on air and then decoded again, so you can
+ *       check it (header, rows, Fastext links, newsflash) without any hardware
  * Messages go to standard error, so they never mix with the packets.
  *
  * Build (Linux / Raspberry Pi):   g++ -O2 -o ttxvbi ttxvbi.cpp
@@ -65,6 +68,8 @@ static std::string g_flash;                    /* "ppp headline" or "" */
 static long        g_rate = 0;                 /* packets per second, 0 = unlimited */
 static long        g_limit = -1;               /* packets left to send, -1 = no limit */
 static long        g_sent = 0;
+static bool        g_cap = false;              /* -p: collect packets instead of sending */
+static std::vector<unsigned char> g_capture;
 
 /* ------------------------------------------------------------------ */
 /*  Teletext coding                                                    */
@@ -98,6 +103,7 @@ static unsigned char Odd(unsigned char c)              /* 7 bits + odd parity in
 
 static void Emit(const unsigned char *pkt)
 {
+    if (g_cap) { g_capture.insert(g_capture.end(), pkt, pkt + 42); return; }
     if (g_limit == 0) exit(0);
     const unsigned char *p = pkt;
     size_t left = 42;
@@ -383,6 +389,101 @@ static void SendPage(Page &p)
     if (any) SendFastext(p.number, p.links);
 }
 
+/* ------------------------------------------------------------------ */
+/*  -p: show a page as text, decoded back from the packets             */
+/* ------------------------------------------------------------------ */
+
+static int Unham(unsigned char b)
+{
+    for (int n = 0; n < 16; n++) if (g_ham[n] == b) return n;
+    return -1;
+}
+
+static int Unpar(unsigned char b, int &errors)
+{
+    int ones = 0;
+    for (int i = 0; i < 8; i++) if (b & (1 << i)) ones++;
+    if ((ones & 1) == 0) errors++;
+    return b & 0x7F;
+}
+
+static int DumpPage(int num)
+{
+    std::map<int, Page>::iterator it = g_pages.find(num);
+    if (it == g_pages.end() || it->second.subs.empty()) {
+        fprintf(stderr, "Page %03X is not in %s\n", num, g_dir.c_str());
+        return 1;
+    }
+    Page &p = it->second;
+    int errors = 0;
+    for (size_t sp = 0; sp < p.subs.size(); sp++) {
+        p.current = sp;
+        g_capture.clear();
+        g_cap = true;
+        SendPage(p);
+        g_cap = false;
+
+        char rows[ROWS][COLS + 1];
+        bool have[ROWS];
+        memset(have, 0, sizeof(have));
+        std::string fastext;
+        int sub = 0, erase = 0, packets = (int)(g_capture.size() / 42);
+        for (int i = 0; i < packets; i++) {
+            const unsigned char *k = &g_capture[(size_t)i * 42];
+            int a = Unham(k[0]), b = Unham(k[1]);
+            if (a < 0 || b < 0) { errors++; continue; }
+            int mag = (a & 7) ? (a & 7) : 8, row = (a >> 3) | (b << 1);
+            if (row == 0) {
+                int u = Unham(k[2]), t = Unham(k[3]), s1 = Unham(k[4]), s2 = Unham(k[5]),
+                    s3 = Unham(k[6]), s4 = Unham(k[7]);
+                if (u < 0 || t < 0 || s1 < 0 || s2 < 0 || s3 < 0 || s4 < 0) { errors++; continue; }
+                sub = s1 | (s2 & 7) << 4 | s3 << 8 | (s4 & 3) << 12;
+                erase = (s2 >> 3) & 1;
+                memset(rows[0], ' ', COLS); rows[0][COLS] = 0;
+                memcpy(rows[0], " P", 2);
+                snprintf(rows[0] + 2, 6, "%X%X%X ", mag, t, u);
+                rows[0][7] = ' ';
+                for (int c = 0; c < 32; c++) rows[0][8 + c] = (char)Unpar(k[10 + c], errors);
+                have[0] = true;
+            } else if (row >= 1 && row <= 24) {
+                for (int c = 0; c < COLS; c++) rows[row][c] = (char)Unpar(k[2 + c], errors);
+                rows[row][COLS] = 0;
+                have[row] = true;
+            } else if (row == 27) {
+                static const char *colour[] = { "red", "green", "yellow", "cyan", "spare", "index" };
+                for (int l = 0; l < 6; l++) {
+                    const unsigned char *q = k + 3 + 6 * l;
+                    int u = Unham(q[0]), t = Unham(q[1]), m1 = Unham(q[3]), m2 = Unham(q[5]);
+                    if (u < 0 || t < 0 || m1 < 0 || m2 < 0) { errors++; continue; }
+                    int rel = ((m1 >> 3) & 1) | (((m2 >> 2) & 1) << 1) | (((m2 >> 3) & 1) << 2);
+                    int m = (mag ^ rel) & 7; if (!m) m = 8;
+                    char buf[40];
+                    if (t == 0xF && u == 0xF) snprintf(buf, sizeof(buf), "%s -  ", colour[l]);
+                    else snprintf(buf, sizeof(buf), "%s %X%X%X  ", colour[l], m, t, u);
+                    fastext += buf;
+                }
+            }
+        }
+        printf("Page %03X   subpage %04X   %d packets   %s\n", num, sub, packets,
+               erase ? "erase-page set" : "");
+        printf("    +----------------------------------------+\n");
+        for (int r = 0; r < ROWS; r++) {
+            char line[COLS + 1];
+            for (int c = 0; c < COLS; c++) {
+                unsigned char ch = have[r] ? (unsigned char)rows[r][c] : ' ';
+                line[c] = (ch < 0x20 || ch > 0x7E) ? ' ' : (char)ch;      /* control codes show as blanks */
+            }
+            line[COLS] = 0;
+            printf(" %2d |%s|%s\n", r, line, have[r] ? "" : " (not sent)");
+        }
+        printf("    +----------------------------------------+\n");
+        printf("    Fastext: %s\n\n", fastext.empty() ? "none" : fastext.c_str());
+    }
+    if (!g_flash.empty()) printf("(newsflash is on: row 24 carries it)\n");
+    printf("%s\n", errors ? "ERRORS found while decoding the packets" : "Hamming and parity checks: all OK");
+    return errors ? 2 : 0;
+}
+
 static void LoadServiceName()
 {
     std::string path = g_dir + "/../ttxserver.cfg";
@@ -403,18 +504,26 @@ static void LoadServiceName()
 int main(int argc, char *argv[])
 {
     bool haveDir = false, haveName = false;
+    int dumpPage = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-d") && i + 1 < argc) { g_dir = argv[++i]; haveDir = true; }
         else if (!strcmp(argv[i], "-n") && i + 1 < argc) { g_name = argv[++i]; haveName = true; }
         else if (!strcmp(argv[i], "-r") && i + 1 < argc) g_rate = atol(argv[++i]);
         else if (!strcmp(argv[i], "-c") && i + 1 < argc) g_limit = atol(argv[++i]);
-        else { fprintf(stderr, "Usage: %s [-d pagesdir] [-n NAME] [-r packets/sec] [-c count]\n", argv[0]); return 1; }
+        else if (!strcmp(argv[i], "-p") && i + 1 < argc) dumpPage = (int)strtol(argv[++i], NULL, 16);
+        else { fprintf(stderr, "Usage: %s [-d pagesdir] [-n NAME] [-r packets/sec] [-c count] [-p page]\n", argv[0]); return 1; }
     }
     struct stat st;
     if (!haveDir && stat(g_dir.c_str(), &st) != 0) g_dir = "pages";
     if (!haveName) LoadServiceName();
     InitHamming();
 
+    if (dumpPage) {
+        if (dumpPage < 0x100 || dumpPage > 0x8FF) { fprintf(stderr, "Page must be 100-8FF\n"); return 1; }
+        ReloadIfChanged();
+        CheckFlash();
+        return DumpPage(dumpPage);
+    }
     fprintf(stderr, "=== Teletext VBI stream '%s' from %s ===\n", g_name.c_str(), g_dir.c_str());
     for (;;) {
         ReloadIfChanged();
