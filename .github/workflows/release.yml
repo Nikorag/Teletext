@@ -24,6 +24,9 @@ jobs:
             packages: g++-aarch64-linux-gnu
           - target: linux-armv7
             packages: g++-arm-linux-gnueabihf
+          # Raspberry Pi 1 and Zero (ARMv6): built inside a toolchain image, see the next step
+          - target: linux-armv6
+            packages: g++
           - target: windows-amd64
             packages: g++-mingw-w64-x86-64 zip
     steps:
@@ -35,7 +38,16 @@ jobs:
           sudo apt-get install -y --no-install-recommends ${{ matrix.packages }}
 
       - name: Build and package
+        if: matrix.target != 'linux-armv6'
         run: bash scripts/build-release.sh "${{ matrix.target }}" "${{ github.ref_name }}"
+
+      # Ubuntu's ARM compilers make ARMv7 code and libraries, which crash on a Pi 1 or Zero,
+      # so this one builds inside dockcross's ARMv6 toolchain (the image sets $CXX)
+      - name: Build and package (ARMv6 toolchain image)
+        if: matrix.target == 'linux-armv6'
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work dockcross/linux-armv6:20260928-b67e766 \
+            bash scripts/build-release.sh linux-armv6 "${{ github.ref_name }}"
 
       - uses: actions/upload-artifact@v4
         with:

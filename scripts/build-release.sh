@@ -3,7 +3,7 @@
 #
 #   scripts/build-release.sh <target> [version]
 #
-# Targets: linux-amd64  linux-arm64  linux-armv7  windows-amd64  macos-arm64
+# Targets: linux-amd64  linux-arm64  linux-armv7  linux-armv6  windows-amd64  macos-arm64
 #
 # The Linux and Windows targets are cross-compiled on an x86-64 Linux machine
 # (the release workflow does this on ubuntu-latest); macos-arm64 is built natively
@@ -11,6 +11,10 @@
 #   linux-amd64    g++
 #   linux-arm64    g++-aarch64-linux-gnu
 #   linux-armv7    g++-arm-linux-gnueabihf
+#   linux-armv6    the dockcross/linux-armv6 image (it sets $CXX): Raspberry Pi 1 and Zero need
+#                  ARMv6 code AND libraries, which Ubuntu's ARM compilers don't make.
+#                  docker run --rm -v "$PWD:/work" -w /work dockcross/linux-armv6:<tag> \
+#                      bash scripts/build-release.sh linux-armv6 <version>
 #   windows-amd64  g++-mingw-w64-x86-64
 #   macos-arm64    clang++ (Xcode command line tools)
 #
@@ -31,6 +35,7 @@ case "$TARGET" in
   linux-amd64)   CXX=g++;                         STATIC="-static" ;;
   linux-arm64)   CXX=aarch64-linux-gnu-g++;       STATIC="-static" ;;
   linux-armv7)   CXX=arm-linux-gnueabihf-g++;     STATIC="-static" ;;
+  linux-armv6)   CXX="${CXX:?linux-armv6 must be built inside the dockcross/linux-armv6 image}"; STATIC="-static" ;;
   windows-amd64) CXX=x86_64-w64-mingw32-g++;      STATIC="-static -static-libgcc -static-libstdc++"; EXT=".exe" ;;
   macos-arm64)   CXX=clang++;                     STATIC="-mmacosx-version-min=11.0" ;;
   *) echo "unknown target: $TARGET" >&2; exit 1 ;;

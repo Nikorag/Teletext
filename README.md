@@ -62,7 +62,8 @@ as a pre-release.
 | `teletext-<tag>-windows-amd64.zip` | Windows 64-bit: server, feeds, **client and editor** |
 | `teletext-<tag>-linux-amd64.tar.gz` | Linux on PCs and servers |
 | `teletext-<tag>-linux-arm64.tar.gz` | 64-bit Raspberry Pi OS and other arm64 Linux |
-| `teletext-<tag>-linux-armv7.tar.gz` | 32-bit Raspberry Pi OS on a Pi 2, 3, 4 or Zero 2 (not the Pi 1 or Zero) |
+| `teletext-<tag>-linux-armv7.tar.gz` | 32-bit Raspberry Pi OS on a Pi 2, 3, 4 or Zero 2 |
+| `teletext-<tag>-linux-armv6.tar.gz` | Raspberry Pi 1 and Zero (and Zero W). Runs on later Pis too, just not as fast |
 | `teletext-<tag>-macos-arm64.tar.gz` | Macs with Apple silicon |
 
 Each package unpacks into folders laid out like this repository (`server/`, `feed/`, ...),
