@@ -5,6 +5,11 @@
 **Ready-built Windows programs:** download them from the
 [Releases](https://github.com/bartleph/Teletext/releases) page, or build them yourself (below).
 
+![Client showing news pages](docs/screenshots-news.png)
+
+**Ready-built Windows programs:** download them from the
+[Releases](https://github.com/bartleph/Teletext/releases) page, or build them yourself (below).
+
 A Teletext service for your network. One server holds the pages and any number of
 clients (on the same PC or across the LAN) connect to it and browse them like a 1980s TV set.
 
@@ -177,6 +182,40 @@ With `server=` and `password=` set in `ttxedit.cfg`:
 The server only accepts saves and deletes with the right password. With no password set,
 anyone on your network can change pages, and the server warns about this when it starts.
 Viewing never needs a password.
+
+## Editing from a tablet or phone (web editor)
+
+![Web editor](docs/screenshots-webedit.png)
+
+The server also has a touch-friendly editor in the browser, so you can edit pages from an
+Android tablet or a phone. It uses the same port as the browser viewer:
+
+    http://<server address>:8080/edit.html
+
+To open a particular page straight away, add `?p=` and the page number, e.g. `edit.html?p=200`.
+
+* **Open / New / Save** are at the top. *Page settings* sets the page number, the seconds
+  per subpage, the coloured-key links and a description. The title shows `unsaved` until
+  the page is saved.
+* **Typing:** tap a cell on the screen to put the cursor there, then tap the *Type* box and
+  type on the tablet's keyboard. The arrow, Enter, Backspace, Ins and Del buttons work as
+  on a PC keyboard. `#` and `£` come out as Teletext # and £.
+* **Colours and effects:** the buttons put a control code at the cursor: text colours,
+  graphics colours, double height, new/black background, flash, conceal, separated
+  graphics, hold graphics and so on. *Show codes* shows the codes as grey letter cells,
+  as in ttxedit.
+* **Drawing:** put a graphics colour code at the start of a row, choose *Draw*, and draw
+  with your finger in the cells after it. *Erase* rubs out. Each finger stroke is one Undo.
+* **Rows and subpages:** insert, delete or clear rows; add, copy and remove subpages.
+* **Delete page from server** removes the page's file.
+
+Saving needs the server's `password=` from `ttxserver.cfg`. The editor asks for it the
+first time; tick *Remember on this device* to save it in the browser.
+* With no password set, the web editor cannot save at all.
+* After 5 wrong passwords, the server refuses any password for a minute.
+* Editing through a Cloudflare tunnel is refused unless you set `webeditremote=1` in
+  `ttxserver.cfg`, so the public viewer address stays view-only. If you turn it on, put
+  Cloudflare Access in front of the site, as the password travels with each save.
 
 ## News from the internet (ttxfeed)
 

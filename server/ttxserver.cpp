@@ -23,6 +23,7 @@
  *          password=secret        (needed by ttxedit to save/delete)
  *          webport=8080           browser client port (0 = off)
  *          webdir=web             folder holding index.html etc.
+ *          webeditremote=0        1 = allow web editing through a Cloudflare tunnel
  * Console: R = reload  L = list clients  P = list pages  Q = quit
  *          (on Linux type the letter and press Enter)
  *
@@ -164,10 +165,13 @@ static std::string          g_signature;
 static std::string          g_flash;          /* current newsflash "ppp headline", or "" */
 
 /* the web (browser) client: a small HTTP server on its own port */
-struct HttpConn { SOCKET sock; std::string buf; time_t opened; bool dead; };
+struct HttpConn { SOCKET sock; std::string buf; time_t opened; bool dead; char addr[48]; };
 static std::vector<HttpConn> g_http;
 static int                   g_webPort = 8080;     /* 0 = off */
 static std::string           g_webDir  = "web";
+static bool                  g_webEditRemote = false;  /* allow editing via a Cloudflare tunnel */
+static int                   g_badTries  = 0;          /* wrong web passwords in a row      */
+static time_t                g_lockUntil = 0;          /* no web logins until this time     */
 
 static void ClearSub(SubPage &s) { memset(s.cell, ' ', sizeof(s.cell)); }
 
@@ -929,17 +933,135 @@ static const char *ContentType(const std::string &name)
     return "application/octet-stream";
 }
 
+/* Save or delete a page file. Returns "" when it worked, or the reason it didn't.
+ * Used by ttxedit (TCP) and by the web editor (HTTP). */
+static std::string SavePageData(int page, const std::string &data, const char *who)
+{
+    if (page < 0x100 || page > 0x8FF) return "page must be 100-8FF";
+    if (data.find("PN,") == std::string::npos) return "that is not a .tti page";
+    char path[64];
+    sprintf(path, PAGE_DIR "/P%03X.tti", page);
+    if (!WriteFileAtomic(path, data)) return "server could not write the file";
+    printf("[%s] saved page %03X\n", who, page);
+    LoadAllPages();
+    char msg[64];
+    if (g_pages.find(page) == g_pages.end()) {
+        sprintf(msg, "saved, but page %03X was not in the data", page);
+        return msg;
+    }
+    return "";
+}
+
+static std::string DeletePageFile(int page, const char *who)
+{
+    char path[64];
+    sprintf(path, PAGE_DIR "/P%03X.tti", page);
+    if (remove(path) != 0) {
+        char msg[64];
+        sprintf(msg, "no file P%03X.tti on the server", page);
+        return msg;
+    }
+    printf("[%s] deleted page %03X\n", who, page);
+    LoadAllPages();
+    return "";
+}
+
+/* value of an HTTP header (name in lower case), "" if absent */
+static std::string HeaderValue(const std::string &req, const char *name)
+{
+    size_t end = req.find("\r\n\r\n");
+    std::string head = req.substr(0, end);
+    std::string low = head;
+    for (size_t i = 0; i < low.size(); i++) low[i] = (char)tolower((unsigned char)low[i]);
+    std::string key = std::string("\r\n") + name + ":";
+    size_t p = low.find(key);
+    if (p == std::string::npos) return "";
+    p += key.size();
+    size_t e = head.find("\r\n", p);
+    std::string v = head.substr(p, e == std::string::npos ? std::string::npos : e - p);
+    while (!v.empty() && v[0] == ' ') v.erase(0, 1);
+    while (!v.empty() && v[v.size() - 1] == ' ') v.erase(v.size() - 1);
+    return v;
+}
+
+/* Is the whole request (headers + body) here yet? */
+static bool HttpComplete(const HttpConn &h)
+{
+    size_t end = h.buf.find("\r\n\r\n");
+    if (end == std::string::npos) return false;
+    int len = atoi(HeaderValue(h.buf, "content-length").c_str());
+    return h.buf.size() >= end + 4 + (size_t)(len > 0 ? len : 0);
+}
+
+static std::string JsonResult(const std::string &err)
+{
+    return err.empty() ? "{\"ok\":true}" : "{\"ok\":false,\"error\":" + JsonText(err) + "}";
+}
+
+/* May this web request edit pages? "" = yes, otherwise why not */
+static std::string WebEditCheck(HttpConn &h)
+{
+    if (g_password.empty())
+        return "Web editing needs a password: set password= in ttxserver.cfg";
+    if (!g_webEditRemote && !HeaderValue(h.buf, "cf-connecting-ip").empty())
+        return "Editing over the internet is turned off (webeditremote=0)";
+    if (time(NULL) < g_lockUntil)
+        return "Too many wrong passwords - wait a minute and try again";
+    if (HeaderValue(h.buf, "x-password") != g_password) {
+        if (++g_badTries >= 5) { g_lockUntil = time(NULL) + 60; g_badTries = 0; }
+        printf("[%s] wrong web edit password\n", h.addr);
+        return "Wrong password";
+    }
+    g_badTries = 0;
+    return "";
+}
+
 static void HandleHttp(HttpConn &h)
 {
     size_t sp1 = h.buf.find(' '), sp2 = h.buf.find(' ', sp1 + 1);
     if (sp1 == std::string::npos || sp2 == std::string::npos) { h.dead = true; return; }
     std::string method = h.buf.substr(0, sp1);
     std::string target = h.buf.substr(sp1 + 1, sp2 - sp1 - 1);
-    if (method != "GET") { HttpReply(h, "405 Method Not Allowed", "text/plain", "GET only\n"); return; }
+    if (method != "GET" && method != "POST") {
+        HttpReply(h, "405 Method Not Allowed", "text/plain", "GET or POST only\n");
+        return;
+    }
 
     std::string path = target, query;
     size_t q = target.find('?');
     if (q != std::string::npos) { path = target.substr(0, q); query = target.substr(q + 1); }
+    int qpage = (int)strtol(QueryValue(query, "p").c_str(), NULL, 16);
+
+    /* ---- web editor ---- */
+    if (path == "/api/list") {
+        std::string j = "{\"pages\":[";
+        char b[16];
+        std::map<int, Page>::iterator it;
+        for (it = g_pages.begin(); it != g_pages.end(); ++it) {
+            sprintf(b, "%s\"%03X\"", it == g_pages.begin() ? "" : ",", it->first);
+            j += b;
+        }
+        HttpReply(h, "200 OK", "application/json", j + "]}");
+        return;
+    }
+    if (path == "/api/tti") {
+        std::map<int, Page>::iterator it = g_pages.find(qpage);
+        if (it == g_pages.end()) HttpReply(h, "404 Not Found", "text/plain", "No such page\n");
+        else HttpReply(h, "200 OK", "text/plain; charset=us-ascii", MakeTTI(it->second));
+        return;
+    }
+    if (method == "POST" && (path == "/api/auth" || path == "/api/save" || path == "/api/delete")) {
+        std::string err = WebEditCheck(h);
+        if (err.empty() && path == "/api/save") {
+            size_t end = h.buf.find("\r\n\r\n");
+            err = SavePageData(qpage, h.buf.substr(end + 4), h.addr);
+        } else if (err.empty() && path == "/api/delete") {
+            err = DeletePageFile(qpage, h.addr);
+        }
+        HttpReply(h, "200 OK", "application/json", JsonResult(err));
+        return;
+    }
+    if (method != "GET") { HttpReply(h, "404 Not Found", "text/plain", "Not found\n"); return; }
 
     if (path == "/api/page") {
         int page = (int)strtol(QueryValue(query, "p").c_str(), NULL, 16);
@@ -984,22 +1106,9 @@ static void HandlePut(Client &c, const std::string &data)
         SendText(c, "ERR password needed - set password= in ttxedit.cfg\n");
         return;
     }
-    if (data.find("PN,") == std::string::npos) {
-        SendText(c, "ERR that is not a .tti page\n");
-        return;
-    }
-    char path[64];
-    sprintf(path, PAGE_DIR "/P%03X.tti", c.putPage);
-    if (!WriteFileAtomic(path, data)) {
-        SendText(c, "ERR server could not write the file\n");
-        return;
-    }
-    printf("[%s] saved page %03X\n", c.addr, c.putPage);
-    LoadAllPages();
-    if (g_pages.find(c.putPage) == g_pages.end())
-        sprintf(msg, "ERR saved, but page %03X was not in the data\n", c.putPage);
-    else
-        sprintf(msg, "OK %03X\n", c.putPage);
+    std::string err = SavePageData(c.putPage, data, c.addr);
+    if (err.empty()) sprintf(msg, "OK %03X\n", c.putPage);
+    else             sprintf(msg, "ERR %.58s\n", err.c_str());
     SendText(c, msg);
 }
 
@@ -1056,16 +1165,9 @@ static void HandleLine(Client &c, const std::string &line)
     }
     else if (sscanf(line.c_str(), "DELETE %x", &page) == 1) {
         if (!MayEdit(c)) { SendText(c, "ERR password needed\n"); return; }
-        char path[64];
-        sprintf(path, PAGE_DIR "/P%03X.tti", page);
-        if (remove(path) != 0) {
-            sprintf(msg, "ERR no file P%03X.tti on the server\n", page);
-            SendText(c, msg);
-            return;
-        }
-        printf("[%s] deleted page %03X\n", c.addr, page);
-        LoadAllPages();
-        sprintf(msg, "OK %03X\n", page);
+        std::string err = DeletePageFile(page, c.addr);
+        if (err.empty()) sprintf(msg, "OK %03X\n", page);
+        else             sprintf(msg, "ERR %.58s\n", err.c_str());
         SendText(c, msg);
     }
     else if (line == "QUIT") {
@@ -1118,6 +1220,7 @@ static void LoadConfig(int &port)
         else if (!strcmp(line, "password")) g_password = eq + 1;
         else if (!strcmp(line, "webport"))  g_webPort = atoi(eq + 1);
         else if (!strcmp(line, "webdir"))   g_webDir = eq + 1;
+        else if (!strcmp(line, "webeditremote")) g_webEditRemote = atoi(eq + 1) != 0;
     }
     fclose(f);
 }
@@ -1260,12 +1363,15 @@ int main(int argc, char *argv[])
             }
             /* browser requests */
             if (web != INVALID_SOCKET && FD_ISSET(web, &rd)) {
-                SOCKET s = accept(web, NULL, NULL);
+                sockaddr_in wa;
+                socklen_t walen = sizeof(wa);
+                SOCKET s = accept(web, (sockaddr *)&wa, &walen);
                 if (s != INVALID_SOCKET) {
                     if (g_http.size() >= 64) closesocket(s);
                     else {
                         HttpConn h;
                         h.sock = s; h.opened = time(NULL); h.dead = false;
+                        sprintf(h.addr, "web %s", inet_ntoa(wa.sin_addr));
                         g_http.push_back(h);
                     }
                 }
@@ -1277,8 +1383,8 @@ int main(int argc, char *argv[])
                 int n = recv(h.sock, buf, sizeof(buf), 0);
                 if (n <= 0) { h.dead = true; continue; }
                 h.buf.append(buf, n);
-                if (h.buf.find("\r\n\r\n") != std::string::npos) HandleHttp(h);
-                else if (h.buf.size() > 8192) h.dead = true;
+                if (HttpComplete(h)) HandleHttp(h);
+                else if (h.buf.size() > (size_t)MAX_PUT + 8192) h.dead = true;
             }
 
             /* data from clients */

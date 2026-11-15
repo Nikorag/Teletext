@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#101018">
+<link rel="icon" type="image/png" href="icon-192.png">
+<title>Teletext Editor</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #101018; color: #ddd;
+               font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 15px; }
+  body { display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; }
+  #bar { display: flex; gap: 6px; padding: 6px 8px; background: #1b1b28; align-items: center;
+         flex-wrap: wrap; flex: none; }
+  #bar .title { font-weight: 600; margin-right: auto; white-space: nowrap; }
+  #main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  #tv { position: relative; overflow: hidden; background: #000; flex: none; margin: 0 auto;
+        width: min(100vw, calc((100dvh - 360px) * 4 / 3)); aspect-ratio: 4 / 3; touch-action: none; }
+  #tv canvas { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
+  #panel { flex: 1; overflow-y: auto; padding: 6px 8px 20px; min-height: 0; }
+  @media (min-aspect-ratio: 1/1) {
+    #main { flex-direction: row; }
+    #tv { width: min(calc(100vw - 390px), calc((100dvh - 56px) * 4 / 3)); margin: 4px; align-self: flex-start; }
+    #panel { width: 380px; flex: none; }
+  }
+  button { font: inherit; color: #fff; background: #2a2a3a; border: 1px solid #44445a; border-radius: 7px;
+           min-height: 40px; padding: 0 10px; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  button:active { background: #4a4a66; }
+  button.on { background: #1f4f8f; border-color: #4a86d0; }
+  button.prim { background: #1f6f3f; border-color: #3fa060; }
+  button.warn { background: #6a2020; border-color: #a04040; }
+  .sec { margin-top: 10px; }
+  .sec h3 { margin: 0 0 5px; font-size: 12px; color: #889; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+  .row { display: flex; flex-wrap: wrap; gap: 5px; }
+  .grid7 { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+  .grid7 button { padding: 0; min-height: 38px; font-weight: 700; }
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+  .grid4 button { padding: 0 4px; font-size: 13px; }
+  #typer { width: 100%; box-sizing: border-box; font: inherit; font-size: 17px; padding: 9px; border-radius: 7px;
+           border: 1px solid #4a86d0; background: #0b0b14; color: #fff; }
+  #info { font-size: 13px; color: #aab; margin-top: 4px; min-height: 18px; }
+  #msg { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); background: #223;
+         border: 1px solid #556; padding: 10px 16px; border-radius: 9px; display: none; max-width: 90vw; z-index: 9; }
+  dialog { background: #1b1b28; color: #ddd; border: 1px solid #556; border-radius: 12px; max-width: 92vw; }
+  dialog::backdrop { background: rgba(0,0,0,.6); }
+  dialog label { display: block; margin: 8px 0 3px; font-size: 13px; color: #aab; }
+  dialog input { font: inherit; padding: 8px; border-radius: 6px; border: 1px solid #556; background: #0b0b14;
+                 color: #fff; width: 100%; box-sizing: border-box; }
+  dialog .links { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
+  dialog .links input { text-align: center; padding: 8px 2px; }
+  dialog .btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+  #pagelist { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px;
+              max-height: 50vh; overflow-y: auto; margin: 8px 0; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <span class="title" id="title">Teletext Editor</span>
+  <button id="bOpen">Open</button>
+  <button id="bNew">New</button>
+  <button id="bSettings">Page settings</button>
+  <button id="bSave" class="prim">Save</button>
+  <button id="bUndo">Undo</button>
+  <button id="bRedo">Redo</button>
+</div>
+<div id="main">
+  <div id="tv"><canvas id="screen" width="480" height="500"></canvas></div>
+  <div id="panel">
+    <div class="sec">
+      <h3>Type</h3>
+      <input id="typer" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+             placeholder="Tap here and type - text goes in at the cursor">
+      <div class="row" style="margin-top:5px">
+        <button data-k="left">&#9664;</button><button data-k="right">&#9654;</button>
+        <button data-k="up">&#9650;</button><button data-k="down">&#9660;</button>
+        <button data-k="enter">&#9166;</button><button data-k="bs">&#9003;</button>
+        <button data-k="ins">Ins</button><button data-k="del">Del</button>
+      </div>
+      <div id="info"></div>
+    </div>
+    <div class="sec">
+      <h3>Mode</h3>
+      <div class="row">
+        <button id="mType" class="on">Type</button>
+        <button id="mDraw">Draw</button>
+        <button id="mErase">Erase</button>
+        <button id="tCodes" class="on">Show codes</button>
+        <button id="tReveal">Reveal</button>
+      </div>
+    </div>
+    <div class="sec">
+      <h3>Text colour</h3>
+      <div class="grid7" id="alpha"></div>
+    </div>
+    <div class="sec">
+      <h3>Graphics colour (then Draw)</h3>
+      <div class="grid7" id="gfx"></div>
+    </div>
+    <div class="sec">
+      <h3>Effects</h3>
+      <div class="grid4">
+        <button data-c="13">Double height</button><button data-c="12">Normal height</button>
+        <button data-c="29">New background</button><button data-c="28">Black background</button>
+        <button data-c="8">Flash</button><button data-c="9">Steady</button>
+        <button data-c="24">Conceal</button><button data-c="26">Separated</button>
+        <button data-c="25">Contiguous</button><button data-c="30">Hold graphics</button>
+        <button data-c="31">Release graphics</button><button data-c="32">Space</button>
+      </div>
+    </div>
+    <div class="sec">
+      <h3>Rows</h3>
+      <div class="row">
+        <button id="rIns">Insert row</button><button id="rDel">Delete row</button>
+        <button id="rClr">Clear row</button><button id="pClr" class="warn">Clear page</button>
+      </div>
+    </div>
+    <div class="sec">
+      <h3>Subpages <span id="subinfo"></span></h3>
+      <div class="row">
+        <button id="sPrev">&#9664;</button><button id="sNext">&#9654;</button>
+        <button id="sAdd">Add blank</button><button id="sDup">Copy this</button>
+        <button id="sDel" class="warn">Remove</button>
+      </div>
+    </div>
+    <div class="sec">
+      <h3>Server</h3>
+      <div class="row">
+        <button id="bDelete" class="warn">Delete page from server</button>
+        <button id="bPassword">Password</button>
+        <button id="bView">Open viewer</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="msg"></div>
+
+<dialog id="dOpen">
+  <b>Open a page</b>
+  <div id="pagelist"></div>
+  <label>or type a page number</label>
+  <input id="openNum" inputmode="numeric" maxlength="3" placeholder="e.g. 200">
+  <div class="btns"><button id="openCancel">Cancel</button><button id="openGo" class="prim">Open</button></div>
+</dialog>
+
+<dialog id="dSettings">
+  <b>Page settings</b>
+  <label>Page number (100-899)</label><input id="sNum" maxlength="3" inputmode="numeric">
+  <label>Seconds per subpage (carousel)</label><input id="sCycle" inputmode="numeric">
+  <label>Fastext links: red, green, yellow, cyan, index (blank = none)</label>
+  <div class="links"><input id="sL0" maxlength="3"><input id="sL1" maxlength="3"><input id="sL2" maxlength="3">
+                     <input id="sL3" maxlength="3"><input id="sL4" maxlength="3"></div>
+  <label>Description (for your reference)</label><input id="sDesc">
+  <div class="btns"><button id="setCancel">Cancel</button><button id="setOk" class="prim">OK</button></div>
+</dialog>
+
+<dialog id="dPass">
+  <b>Server password</b>
+  <p style="font-size:13px;color:#aab;margin:6px 0">The password= set in ttxserver.cfg</p>
+  <input id="passIn" type="password" autocomplete="current-password">
+  <label style="display:flex;gap:8px;align-items:center"><input id="passKeep" type="checkbox" style="width:auto"> Remember on this device</label>
+  <div class="btns"><button id="passCancel">Cancel</button><button id="passOk" class="prim">OK</button></div>
+</dialog>
+
+<script>
+"use strict";
+/* ------------------------------------------------------------------
+ * Teletext page editor for tablets and browsers (served by ttxserver).
+ * Same SAA5050 display as the viewer, plus control codes, a cursor and
+ * finger drawing of mosaic graphics. Pages are opened from and saved to
+ * the server; saving needs the server's password.
+ * ------------------------------------------------------------------ */
+
+// SAA5050 (UK) character ROM: 96 chars x 10 rows, 6 bits (bit 5 = left).
+// From hoard-of-bitfonts (saa5050-uk.yaff), public domain.
+const ROM = [
+  [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+  [0x00, 0x04, 0x04, 0x04, 0x04, 0x04, 0x00, 0x04, 0x00, 0x00],
+  [0x00, 0x0A, 0x0A, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+  [0x00, 0x06, 0x09, 0x08, 0x1C, 0x08, 0x08, 0x1F, 0x00, 0x00],
+  [0x00, 0x0E, 0x15, 0x14, 0x0E, 0x05, 0x15, 0x0E, 0x00, 0x00],
+  [0x00, 0x18, 0x19, 0x02, 0x04, 0x08, 0x13, 0x03, 0x00, 0x00],
+  [0x00, 0x08, 0x14, 0x14, 0x08, 0x15, 0x12, 0x0D, 0x00, 0x00],
+  [0x00, 0x04, 0x04, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+  [0x00, 0x02, 0x04, 0x08, 0x08, 0x08, 0x04, 0x02, 0x00, 0x00],
+  [0x00, 0x08, 0x04, 0x02, 0x02, 0x02, 0x04, 0x08, 0x00, 0x00],
+  [0x00, 0x04, 0x15, 0x0E, 0x04, 0x0E, 0x15, 0x04, 0x00, 0x00],
+  [0x00, 0x00, 0x04, 0x04, 0x1F, 0x04, 0x04, 0x00, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x04, 0x08, 0x00],
+  [0x00, 0x00, 0x00, 0x00, 0x0E, 0x00, 0x00, 0x00, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00],
+  [0x00, 0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x00, 0x00, 0x00],
+  [0x00, 0x04, 0x0A, 0x11, 0x11, 0x11, 0x0A, 0x04, 0x00, 0x00],
+  [0x00, 0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E, 0x00, 0x00],
+  [0x00, 0x0E, 0x11, 0x01, 0x06, 0x08, 0x10, 0x1F, 0x00, 0x00],
+  [0x00, 0x1F, 0x01, 0x02, 0x06, 0x01, 0x11, 0x0E, 0x00, 0x00],
+  [0x00, 0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02, 0x00, 0x00],
+  [0x00, 0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E, 0x00, 0x00],
+  [0x00, 0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E, 0x00, 0x00],
+  [0x00, 0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08, 0x00, 0x00],
+  [0x00, 0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E, 0x00, 0x00],
+  [0x00, 0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x04, 0x04, 0x08, 0x00],
+  [0x00, 0x02, 0x04, 0x08, 0x10, 0x08, 0x04, 0x02, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x1F, 0x00, 0x1F, 0x00, 0x00, 0x00, 0x00],
+  [0x00, 0x08, 0x04, 0x02, 0x01, 0x02, 0x04, 0x08, 0x00, 0x00],
+  [0x00, 0x0E, 0x11, 0x02, 0x04, 0x04, 0x00, 0x04, 0x00, 0x00],
+  [0x00, 0x0E, 0x11, 0x17, 0x15, 0x17, 0x10, 0x0E, 0x00, 0x00],
+  [0x00, 0x04, 0x0A, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x00, 0x00],
+  [0x00, 0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E, 0x00, 0x00],
+  [0x00, 0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E, 0x00, 0x00],
+  [0x00, 0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E, 0x00, 0x00],
+  [0x00, 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F, 0x00, 0x00],
+  [0x00, 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10, 0x00, 0x00],
+  [0x00, 0x0E, 0x11, 0x10, 0x10, 0x13, 0x11, 0x0F, 0x00, 0x00],
+  [0x00, 0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11, 0x00, 0x00],
+  [0x00, 0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E, 0x00, 0x00],
+  [0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x11, 0x0E, 0x00, 0x00],
+  [0x00, 0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11, 0x00, 0x00],
+  [0x00, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F, 0x00, 0x00],
+  [0x00, 0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11, 0x00, 0x00],
+  [0x00, 0x11, 0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x00, 0x00],
+  [0x00, 0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E, 0x00, 0x00],
+  [0x00, 0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10, 0x00, 0x00],
+  [0x00, 0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D, 0x00, 0x00],
+  [0x00, 0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11, 0x00, 0x00],
+  [0x00, 0x0E, 0x11, 0x10, 0x0E, 0x01, 0x11, 0x0E, 0x00, 0x00],
+  [0x00, 0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x00, 0x00],
+  [0x00, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E, 0x00, 0x00],
+  [0x00, 0x11, 0x11, 0x11, 0x0A, 0x0A, 0x04, 0x04, 0x00, 0x00],
+  [0x00, 0x11, 0x11, 0x11, 0x15, 0x15, 0x15, 0x0A, 0x00, 0x00],
+  [0x00, 0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11, 0x00, 0x00],
+  [0x00, 0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04, 0x00, 0x00],
+  [0x00, 0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F, 0x00, 0x00],
+  [0x00, 0x00, 0x04, 0x08, 0x1F, 0x08, 0x04, 0x00, 0x00, 0x00],
+  [0x00, 0x10, 0x10, 0x10, 0x10, 0x16, 0x01, 0x02, 0x04, 0x07],
+  [0x00, 0x00, 0x04, 0x02, 0x1F, 0x02, 0x04, 0x00, 0x00, 0x00],
+  [0x00, 0x00, 0x04, 0x0E, 0x15, 0x04, 0x04, 0x00, 0x00, 0x00],
+  [0x00, 0x0A, 0x0A, 0x1F, 0x0A, 0x1F, 0x0A, 0x0A, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x0E, 0x01, 0x0F, 0x11, 0x0F, 0x00, 0x00],
+  [0x00, 0x10, 0x10, 0x1E, 0x11, 0x11, 0x11, 0x1E, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x0F, 0x10, 0x10, 0x10, 0x0F, 0x00, 0x00],
+  [0x00, 0x01, 0x01, 0x0F, 0x11, 0x11, 0x11, 0x0F, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x0E, 0x11, 0x1F, 0x10, 0x0E, 0x00, 0x00],
+  [0x00, 0x02, 0x04, 0x04, 0x0E, 0x04, 0x04, 0x04, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x0F, 0x11, 0x11, 0x11, 0x0F, 0x01, 0x0E],
+  [0x00, 0x10, 0x10, 0x1E, 0x11, 0x11, 0x11, 0x11, 0x00, 0x00],
+  [0x00, 0x04, 0x00, 0x0C, 0x04, 0x04, 0x04, 0x0E, 0x00, 0x00],
+  [0x00, 0x04, 0x00, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x08],
+  [0x00, 0x08, 0x08, 0x09, 0x0A, 0x0C, 0x0A, 0x09, 0x00, 0x00],
+  [0x00, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x1A, 0x15, 0x15, 0x15, 0x15, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x1E, 0x11, 0x11, 0x11, 0x11, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x0E, 0x11, 0x11, 0x11, 0x0E, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x1E, 0x11, 0x11, 0x11, 0x1E, 0x10, 0x10],
+  [0x00, 0x00, 0x00, 0x0F, 0x11, 0x11, 0x11, 0x0F, 0x01, 0x01],
+  [0x00, 0x00, 0x00, 0x0B, 0x0C, 0x08, 0x08, 0x08, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x0F, 0x10, 0x0E, 0x01, 0x1E, 0x00, 0x00],
+  [0x00, 0x04, 0x04, 0x0E, 0x04, 0x04, 0x04, 0x02, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x11, 0x11, 0x11, 0x11, 0x0F, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x11, 0x11, 0x0A, 0x0A, 0x04, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x11, 0x11, 0x15, 0x15, 0x0A, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x11, 0x11, 0x11, 0x11, 0x0F, 0x01, 0x0E],
+  [0x00, 0x00, 0x00, 0x1F, 0x02, 0x04, 0x08, 0x1F, 0x00, 0x00],
+  [0x00, 0x08, 0x08, 0x08, 0x08, 0x09, 0x03, 0x05, 0x07, 0x01],
+  [0x00, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x00, 0x00],
+  [0x00, 0x18, 0x04, 0x18, 0x04, 0x19, 0x03, 0x05, 0x07, 0x01],
+  [0x00, 0x00, 0x04, 0x00, 0x1F, 0x00, 0x04, 0x00, 0x00, 0x00],
+  [0x00, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x00, 0x00]
+];
+
+const COLS = 40, ROWS = 25, CW = 12, CH = 20, W = COLS * CW, H = ROWS * CH;
+const RGB = [[0,0,0],[255,0,0],[0,255,0],[255,255,0],[0,0,255],[255,0,255],[0,255,255],[255,255,255]];
+const PAL = RGB.map(([r, g, b]) => (0xFF000000 | (b << 16) | (g << 8) | r) >>> 0);
+const u32 = (r, g, b) => (0xFF000000 | (b << 16) | (g << 8) | r) >>> 0;
+const CODE_NAMES = ["Alpha black","Alpha red","Alpha green","Alpha yellow","Alpha blue","Alpha magenta",
+  "Alpha cyan","Alpha white","Flash","Steady","End box","Start box","Normal height","Double height",
+  "Double width","Double size","Graphics black","Graphics red","Graphics green","Graphics yellow",
+  "Graphics blue","Graphics magenta","Graphics cyan","Graphics white","Conceal","Contiguous graphics",
+  "Separated graphics","(Escape)","Black background","New background","Hold graphics","Release graphics"];
+
+const GLYPH = ROM.map(rom => {
+  const g = new Array(20).fill(0);
+  for (let r = 0; r < 10; r++)
+    for (let x = 0; x < 6; x++)
+      if (rom[r] & (0x20 >> x)) { const two = 0xC00 >> (2 * x); g[2*r] |= two; g[2*r+1] |= two; }
+  for (let r = 0; r < 9; r++)
+    for (let x = 0; x < 5; x++) {
+      const a0 = rom[r] & (0x20 >> x), a1 = rom[r] & (0x20 >> (x + 1));
+      const b0 = rom[r+1] & (0x20 >> x), b1 = rom[r+1] & (0x20 >> (x + 1));
+      const pL = 0x800 >> (2*x + 1), pR = 0x800 >> (2*x + 2);
+      if (a0 && b1 && !a1 && !b0) { g[2*r+1] |= pR; g[2*r+2] |= pL; }
+      if (a1 && b0 && !a0 && !b1) { g[2*r+1] |= pL; g[2*r+2] |= pR; }
+    }
+  return g;
+});
+
+const $ = id => document.getElementById(id);
+const canvas = $("screen"), ctx = canvas.getContext("2d");
+const img = ctx.createImageData(W, H), pix = new Uint32Array(img.data.buffer);
+
+// ---- the document ----
+const blank = () => new Uint8Array(COLS * ROWS).fill(32);
+let subs = [blank()], cur = 0;
+let pageNum = 0x100, cycle = 8, links = [0, 0, 0, 0, 0x100], desc = "";
+let dirty = false, onServer = false;
+let undoStack = [], redoStack = [];
+
+// ---- editor state ----
+let row = 1, col = 0, mode = "type", showCodes = true, reveal = false, phase = true;
+let rowDbl = new Array(ROWS).fill(false);
+let password = sessionStorage.getItem("ttxPass") || localStorage.getItem("ttxPass") || "";
+
+const hex3 = n => n.toString(16).toUpperCase().padStart(3, "0");
+const cell = (r, c) => subs[cur][r * COLS + c];
+const setCell = (r, c, v) => { subs[cur][r * COLS + c] = v & 0x7F; };
+
+function toast(t, ms) {
+  const m = $("msg"); m.textContent = t; m.style.display = "block";
+  clearTimeout(toast.t); toast.t = setTimeout(() => m.style.display = "none", ms || 2500);
+}
+
+// ---- undo ----
+function pushUndo() {
+  undoStack.push({ sub: cur, data: subs[cur].slice() });
+  if (undoStack.length > 200) undoStack.shift();
+  redoStack = [];
+}
+function undoRedo(from, to) {
+  if (!from.length) { toast("Nothing to undo"); return; }
+  const u = from.pop();
+  if (u.sub >= subs.length) return;
+  to.push({ sub: u.sub, data: subs[u.sub].slice() });
+  subs[u.sub] = u.data; cur = u.sub;
+  changed();
+}
+function changed() { dirty = true; updateTitle(); render(); }
+
+// ---- drawing ----
+function fill(x, y, w, h, c) {
+  for (let yy = y; yy < y + h && yy < H; yy++) { const o = yy * W; for (let xx = x; xx < x + w; xx++) pix[o + xx] = c; }
+}
+function mosaic(x, y, h, ch, fg, sep) {
+  const bit = [[1, 2], [4, 8], [16, 64]];
+  const rh = [Math.floor(h * 3 / 10), Math.floor(h * 4 / 10)]; rh.push(h - rh[0] - rh[1]);
+  const gy = Math.floor(h / 10);
+  let yy = y;
+  for (let r = 0; r < 3; r++) {
+    for (let k = 0; k < 2; k++) if (ch & bit[r][k]) {
+      const xx = x + k * 6;
+      if (sep) fill(xx + 2, yy, 4, rh[r] - gy, PAL[fg]); else fill(xx, yy, 6, rh[r], PAL[fg]);
+    }
+    yy += rh[r];
+  }
+}
+function glyph(x, y, h, ch, colour, dbl) {
+  if (ch < 0x20 || ch > 0x7F) return;
+  const g = GLYPH[ch - 0x20];
+  for (let line = 0; line < h && y + line < H; line++) {
+    const bits = g[dbl ? line >> 1 : line]; if (!bits) continue;
+    const o = (y + line) * W + x;
+    for (let px = 0; px < CW; px++) if (bits & (0x800 >> px)) pix[o + px] = colour;
+  }
+}
+function codeCell(x, y, code) {        // a control code shown as its Esc letter
+  let bg = u32(64, 64, 64), fg = PAL[7];
+  if (code <= 7) fg = code ? PAL[code] : u32(128, 128, 128);
+  else if (code >= 0x10 && code <= 0x17) { const [r, g, b] = RGB[code - 0x10]; bg = u32(r >> 1, g >> 1, b >> 1); }
+  fill(x, y, CW, CH, bg);
+  glyph(x, y, CH, code + 0x40, fg, false);
+}
+
+function render() {
+  pix.fill(PAL[0]);
+  const page = subs[cur];
+  let skip = false;
+  for (let r = 0; r < ROWS; r++) {
+    rowDbl[r] = false;
+    if (skip) { skip = false; continue; }
+    let rb;
+    if (r === 0) {
+      const t = (" " + hex3(pageNum) + "    \x06(header row: made by the server)").padEnd(COLS);
+      rb = Uint8Array.from(t.slice(0, COLS), ch => ch.charCodeAt(0));
+    } else rb = page.slice(r * COLS, r * COLS + COLS);
+    let dblRow = false;
+    if (r > 0 && r < ROWS - 1) for (let c = 0; c < COLS; c++) if ((rb[c] & 0x7F) === 0x0D) dblRow = true;
+    rowDbl[r] = dblRow;
+    let fg = 7, bg = 0, gfx = false, sep = false, holdG = false, fl = false, conceal = false, dbl = false;
+    let held = 0x20, heldSep = false;
+    const y = r * CH;
+    for (let c = 0; c < COLS; c++) {
+      const ch = rb[c] & 0x7F, x = c * CW;
+      switch (ch) {
+        case 0x09: fl = false; break;  case 0x0C: if (dbl) held = 0x20; dbl = false; break;
+        case 0x18: conceal = true; break; case 0x19: sep = false; break; case 0x1A: sep = true; break;
+        case 0x1C: bg = 0; break; case 0x1D: bg = fg; break; case 0x1E: holdG = true; break;
+      }
+      let show = 0x20, showSep = sep, mos = false;
+      if (ch < 0x20) { if (holdG && gfx) { show = held; showSep = heldSep; mos = true; } }
+      else { show = ch; if (gfx && (ch & 0x20)) { mos = true; held = ch; heldSep = sep; } }
+      fill(x, y, CW, dblRow ? 2 * CH : CH, PAL[bg]);
+      if (ch < 0x20 && showCodes && r > 0) codeCell(x, y, ch);
+      else if (!(fl && !phase) && !(conceal && !reveal) && show !== 0x20) {
+        const h = dbl ? 2 * CH : CH;
+        if (mos) mosaic(x, y, h, show, fg, showSep); else glyph(x, y, h, show, PAL[fg], dbl);
+      }
+      if (ch <= 7) { fg = ch; gfx = false; conceal = false; held = 0x20; }
+      else if (ch >= 0x10 && ch <= 0x17) { fg = ch - 0x10; gfx = true; conceal = false; }
+      else if (ch === 0x08) fl = true;
+      else if (ch === 0x0D && dblRow) { dbl = true; held = 0x20; }
+      else if (ch === 0x1F) holdG = false;
+    }
+    if (dblRow) skip = true;
+  }
+  if (mode !== "type" || phase) {               // cursor: an inverted frame
+    const x0 = col * CW, y0 = row * CH;
+    for (let yy = y0; yy < y0 + CH; yy++) for (let xx = x0; xx < x0 + CW; xx++)
+      if (yy < y0 + 2 || yy >= y0 + CH - 2 || xx < x0 + 1 || xx >= x0 + CW - 1)
+        pix[yy * W + xx] = (pix[yy * W + xx] ^ 0x00FFFFFF) >>> 0;
+  }
+  ctx.putImageData(img, 0, 0);
+  updateInfo();
+}
+
+// ---- cell helpers ----
+function isGraphicsAt(r, c) {
+  let g = false;
+  for (let k = 0; k < c; k++) { const x = cell(r, k) & 0x7F; if (x <= 7) g = false; else if (x >= 0x10 && x <= 0x17) g = true; }
+  return g;
+}
+function isDoubleAt(r, c) {
+  if (!rowDbl[r]) return false;
+  let d = false;
+  for (let k = 0; k <= c; k++) { const x = cell(r, k) & 0x7F; if (x === 0x0C) d = false; if (k < c && x === 0x0D) d = true; }
+  return d;
+}
+function updateInfo() {
+  const c = cell(row, col) & 0x7F;
+  let what;
+  if (c < 0x20) what = "Code " + c.toString(16).toUpperCase().padStart(2, "0") + " " + CODE_NAMES[c];
+  else if (isGraphicsAt(row, col) && (c & 0x20)) what = "Mosaic " + c.toString(16).toUpperCase();
+  else what = "Char '" + (c === 0x23 ? "£" : c === 0x5F ? "#" : String.fromCharCode(c)) + "'";
+  $("info").textContent = "Row " + row + "  Col " + col + "  •  " + what;
+  $("subinfo").textContent = "(" + (cur + 1) + " of " + subs.length + ")";
+}
+function updateTitle() {
+  $("title").textContent = "P" + hex3(pageNum) + (subs.length > 1 ? " " + (cur + 1) + "/" + subs.length : "") +
+                           (dirty ? " • unsaved" : onServer ? " • saved" : "");
+}
+
+// ---- editing ----
+function moveRight() { if (col < COLS - 1) col++; else if (row < ROWS - 1) { row++; col = 0; } }
+function putCode(v) { pushUndo(); setCell(row, col, v); moveRight(); changed(); }
+function typeChar(ch) {
+  let v = ch.charCodeAt(0);
+  if (ch === "£") v = 0x23; else if (ch === "#") v = 0x5F;
+  if (v < 0x20 || v > 0x7E) return;
+  putCode(v);
+}
+function key(k) {
+  const pg = subs[cur], o = row * COLS;
+  switch (k) {
+    case "left": if (col > 0) col--; break;
+    case "right": if (col < COLS - 1) col++; break;
+    case "up": if (row > 1) row--; break;
+    case "down": if (row < ROWS - 1) row++; break;
+    case "enter": col = 0; if (row < ROWS - 1) row++; break;
+    case "bs": if (col > 0) { col--; pushUndo(); setCell(row, col, 32); changed(); } break;
+    case "del": pushUndo(); pg.copyWithin(o + col, o + col + 1, o + COLS); pg[o + COLS - 1] = 32; changed(); break;
+    case "ins": pushUndo(); pg.copyWithin(o + col + 1, o + col, o + COLS - 1); pg[o + col] = 32; changed(); break;
+  }
+  phase = true; render();
+}
+function rowOp(op) {
+  const pg = subs[cur];
+  pushUndo();
+  if (op === "ins") { pg.copyWithin((row + 1) * COLS, row * COLS, (ROWS - 1) * COLS); pg.fill(32, row * COLS, row * COLS + COLS); }
+  if (op === "del") { pg.copyWithin(row * COLS, (row + 1) * COLS, ROWS * COLS); pg.fill(32, (ROWS - 1) * COLS); }
+  if (op === "clr") pg.fill(32, row * COLS, row * COLS + COLS);
+  if (op === "page") pg.fill(32, COLS);
+  changed();
+}
+
+// ---- touching the screen ----
+function toBuf(ev) {
+  const r = canvas.getBoundingClientRect();
+  return [(ev.clientX - r.left) / r.width * W, (ev.clientY - r.top) / r.height * H];
+}
+function cellAt(ev) { const [bx, by] = toBuf(ev); return cellAtXY(bx, by); }
+function cellAtXY(bx, by) {
+  let rr = Math.floor(by / CH), cc = Math.floor(bx / CW), line = by % CH;
+  if (rr < 0 || rr >= ROWS || cc < 0 || cc >= COLS) return null;
+  if (rr > 0 && rowDbl[rr - 1]) { rr--; line += CH; }
+  const sx = Math.floor((bx % CW) / (CW / 2));
+  let sy;
+  if (isDoubleAt(rr, cc)) line /= 2; else if (line >= CH) sy = -1;
+  if (sy === undefined) sy = line < 6 ? 0 : line < 14 ? 1 : 2;
+  return { r: rr, c: cc, sx, sy };
+}
+function setSixel(p, on) {
+  if (p.r < 1 || p.sy < 0) return false;
+  const bit = [[1, 2], [4, 8], [16, 64]][p.sy][p.sx];
+  let c = cell(p.r, p.c) & 0x7F;
+  if (c < 0x20) return false;
+  if (!isGraphicsAt(p.r, p.c)) {
+    if (!drawing || !setSixel.warned) toast("Put a graphics colour code to the left first");
+    setSixel.warned = true; return false;
+  }
+  if (c >= 0x40 && c < 0x60) c = 0x20;
+  const n = (on ? c | bit : c & ~bit) | 0x20;
+  if (n === cell(p.r, p.c)) return false;
+  setCell(p.r, p.c, n);
+  return true;
+}
+let drawing = false, lastX = 0, lastY = 0;
+canvas.addEventListener("pointerdown", ev => {
+  const p = cellAt(ev); if (!p || p.r < 1) return;
+  ev.preventDefault();
+  row = p.r; col = p.c;
+  if (mode === "type") { phase = true; render(); return; }
+  drawing = true; setSixel.warned = false;
+  canvas.setPointerCapture(ev.pointerId);
+  pushUndo();
+  [lastX, lastY] = toBuf(ev);
+  if (setSixel(p, mode === "draw")) dirty = true;
+  updateTitle(); render();
+});
+canvas.addEventListener("pointermove", ev => {
+  if (!drawing) return;
+  // fill in every sixel between the last point and this one, so fast strokes leave no gaps
+  const [bx, by] = toBuf(ev);
+  const steps = Math.max(1, Math.ceil(Math.hypot(bx - lastX, by - lastY) / 2));
+  let p = null;
+  for (let i = 1; i <= steps; i++) {
+    const q = cellAtXY(lastX + (bx - lastX) * i / steps, lastY + (by - lastY) * i / steps);
+    if (!q) continue;
+    p = q;
+    if (setSixel(q, mode === "draw")) dirty = true;
+  }
+  lastX = bx; lastY = by;
+  if (p) { row = Math.max(1, p.r); col = p.c; }
+  updateTitle(); render();
+});
+const stopDraw = () => { drawing = false; };
+canvas.addEventListener("pointerup", stopDraw);
+canvas.addEventListener("pointercancel", stopDraw);
+
+// ---- the on-screen keyboard (and real keyboards) ----
+const typer = $("typer");
+typer.addEventListener("input", () => {
+  const v = typer.value;
+  if (v) { for (const ch of v) typeChar(ch); typer.value = ""; }
+});
+typer.addEventListener("keydown", ev => {
+  const map = { Backspace: "bs", Enter: "enter", ArrowLeft: "left", ArrowRight: "right",
+                ArrowUp: "up", ArrowDown: "down", Delete: "del", Insert: "ins" };
+  if (map[ev.key] && !typer.value) { ev.preventDefault(); key(map[ev.key]); }
+});
+document.querySelectorAll("[data-k]").forEach(b => b.onclick = () => key(b.dataset.k));
+
+// ---- code palette ----
+const NAMES = ["Black", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White"];
+for (let i = 1; i <= 7; i++) {
+  const [r, g, b] = RGB[i], dark = i === 4 || i === 1 || i === 5;
+  const a = document.createElement("button");
+  a.textContent = "A"; a.title = "Text " + NAMES[i];
+  a.style.cssText = `background:rgb(${r},${g},${b});color:${dark ? "#fff" : "#000"};border-color:#000`;
+  a.onclick = () => putCode(i);
+  $("alpha").appendChild(a);
+  const gb = document.createElement("button");
+  gb.textContent = "▓"; gb.title = "Graphics " + NAMES[i];
+  gb.style.cssText = `background:#111;color:rgb(${r},${g},${b});font-size:22px`;
+  gb.onclick = () => putCode(0x10 + i);
+  $("gfx").appendChild(gb);
+}
+document.querySelectorAll("[data-c]").forEach(b => b.onclick = () => putCode(+b.dataset.c));
+
+// ---- modes and toggles ----
+function setMode(m) {
+  mode = m;
+  $("mType").classList.toggle("on", m === "type");
+  $("mDraw").classList.toggle("on", m === "draw");
+  $("mErase").classList.toggle("on", m === "erase");
+  if (m !== "type") toast(m === "draw" ? "Draw with your finger - in cells after a graphics colour"
+                                       : "Erase with your finger");
+  render();
+}
+$("mType").onclick = () => setMode("type");
+$("mDraw").onclick = () => setMode("draw");
+$("mErase").onclick = () => setMode("erase");
+$("tCodes").onclick = () => { showCodes = !showCodes; $("tCodes").classList.toggle("on", showCodes); render(); };
+$("tReveal").onclick = () => { reveal = !reveal; $("tReveal").classList.toggle("on", reveal); render(); };
+$("rIns").onclick = () => rowOp("ins");
+$("rDel").onclick = () => rowOp("del");
+$("rClr").onclick = () => rowOp("clr");
+$("pClr").onclick = () => { if (confirm("Clear the whole subpage?")) rowOp("page"); };
+$("bUndo").onclick = () => undoRedo(undoStack, redoStack);
+$("bRedo").onclick = () => undoRedo(redoStack, undoStack);
+
+// ---- subpages ----
+function subOp(op) {
+  if (op === "prev" || op === "next") { cur = (cur + (op === "next" ? 1 : subs.length - 1)) % subs.length; render(); updateTitle(); return; }
+  if (op === "add" || op === "dup") { subs.splice(cur + 1, 0, op === "add" ? blank() : subs[cur].slice()); cur++; }
+  if (op === "del") {
+    if (subs.length < 2) { toast("A page needs at least one subpage"); return; }
+    if (!confirm("Remove this subpage?")) return;
+    subs.splice(cur, 1); if (cur >= subs.length) cur = subs.length - 1;
+  }
+  undoStack = []; redoStack = [];
+  changed();
+}
+$("sPrev").onclick = () => subOp("prev");
+$("sNext").onclick = () => subOp("next");
+$("sAdd").onclick = () => subOp("add");
+$("sDup").onclick = () => subOp("dup");
+$("sDel").onclick = () => subOp("del");
+
+// ---- .tti files ----
+function parseTTI(text) {
+  const out = []; let page = -1, cyc = 8, lk = [0, 0, 0, 0, 0x100], de = "", skipping = false;
+  const link = s => { let v = parseInt(s, 16) || 0; if ((v & 0xFF) === 0xFF) return 0; if (!(v >> 8)) v |= 0x800;
+                      return v >= 0x100 && v <= 0x8FF ? v : 0; };
+  for (let line of text.split("\n")) {
+    line = line.replace(/\r$/, "");
+    if (line.startsWith("DE,")) de = line.slice(3);
+    else if (line.startsWith("CT,")) cyc = parseInt(line.slice(3)) || 8;
+    else if (line.startsWith("PN,")) {
+      let n = parseInt(line.slice(3, 6), 16); if (!(n >> 8)) n |= 0x800;
+      if (page < 0) page = n;
+      skipping = n !== page;
+      if (!skipping) out.push(blank());
+    } else if (line.startsWith("OL,") && !skipping && out.length) {
+      const m = line.match(/^OL,(\d+),/); if (!m) continue;
+      const r = +m[1]; if (r < 1 || r >= ROWS) continue;
+      const t = line.slice(m[0].length), pg = out[out.length - 1];
+      let c = 0;
+      for (let i = 0; i < t.length && c < COLS; i++) {
+        let v = t.charCodeAt(i);
+        if (v === 0x1B) { if (++i >= t.length) break; v = (t.charCodeAt(i) - 0x40) & 0x7F; } else v &= 0x7F;
+        pg[r * COLS + c++] = v;
+      }
+    } else if (line.startsWith("FL,") && !skipping) {
+      const f = line.slice(3).split(",");
+      lk = [link(f[0]), link(f[1]), link(f[2]), link(f[3]), link(f[5]) || 0x100];
+    }
+  }
+  if (!out.length) return false;
+  subs = out; cur = 0; pageNum = page; cycle = cyc; links = lk; desc = de;
+  row = 1; col = 0; undoStack = []; redoStack = []; dirty = false;
+  return true;
+}
+function makeTTI() {
+  let s = "DE," + desc + "\r\nCT," + cycle + ",T\r\n";
+  const multi = subs.length > 1;
+  subs.forEach((pg, i) => {
+    const n = multi ? i + 1 : 0;
+    s += "PN," + hex3(pageNum) + String(n).padStart(2, "0") + "\r\nSC," + String(n).padStart(4, "0") + "\r\nPS,8000\r\n";
+    for (let r = 1; r < ROWS; r++) {
+      let len = COLS; while (len > 0 && pg[r * COLS + len - 1] === 32) len--;
+      if (!len) continue;
+      let t = "";
+      for (let c = 0; c < len; c++) { const v = pg[r * COLS + c] & 0x7F; t += v < 0x20 ? "\x1b" + String.fromCharCode(v + 0x40) : String.fromCharCode(v); }
+      s += "OL," + r + "," + t + "\r\n";
+    }
+  });
+  const l = links.map(v => hex3(v || 0x8FF));
+  s += "FL," + l[0] + "," + l[1] + "," + l[2] + "," + l[3] + ",8FF," + l[4] + "\r\n";
+  return s;
+}
+
+// ---- server ----
+function askPassword() {
+  return new Promise(resolve => {
+    $("passIn").value = password; $("passKeep").checked = !!localStorage.getItem("ttxPass");
+    $("dPass").showModal();
+    $("passOk").onclick = () => {
+      password = $("passIn").value;
+      sessionStorage.setItem("ttxPass", password);
+      if ($("passKeep").checked) localStorage.setItem("ttxPass", password); else localStorage.removeItem("ttxPass");
+      $("dPass").close(); resolve(true);
+    };
+    $("passCancel").onclick = () => { $("dPass").close(); resolve(false); };
+  });
+}
+async function post(path, body) {
+  if (!password && !(await askPassword())) return null;
+  for (let tries = 0; tries < 2; tries++) {
+    try {
+      const r = await fetch(path, { method: "POST", headers: { "X-Password": password }, body: body || "" });
+      const j = await r.json();
+      if (j.ok || j.error !== "Wrong password") return j;
+      toast("Wrong password");
+      if (!(await askPassword())) return null;
+    } catch (e) { toast("Cannot reach the server"); return null; }
+  }
+  return null;
+}
+async function save() {
+  const j = await post("api/save?p=" + hex3(pageNum), makeTTI());
+  if (!j) return;
+  if (j.ok) { dirty = false; onServer = true; updateTitle(); toast("Saved page " + hex3(pageNum)); }
+  else toast(j.error, 5000);
+}
+async function openPage(n) {
+  try {
+    const r = await fetch("api/tti?p=" + hex3(n), { cache: "no-store" });
+    if (!r.ok) { toast("Page " + hex3(n) + " isn't on the server - use New"); return; }
+    if (parseTTI(await r.text())) { onServer = true; updateTitle(); render(); toast("Opened page " + hex3(n)); }
+  } catch (e) { toast("Cannot reach the server"); }
+}
+function okToLeave() { return !dirty || confirm("This page has unsaved changes. Carry on and lose them?"); }
+
+$("bSave").onclick = save;
+$("bOpen").onclick = async () => {
+  if (!okToLeave()) return;
+  const list = $("pagelist"); list.innerHTML = "Loading...";
+  $("dOpen").showModal();
+  try {
+    const j = await (await fetch("api/list", { cache: "no-store" })).json();
+    list.innerHTML = "";
+    j.pages.forEach(p => {
+      const b = document.createElement("button"); b.textContent = p;
+      b.onclick = () => { $("dOpen").close(); openPage(parseInt(p, 16)); };
+      list.appendChild(b);
+    });
+  } catch (e) { list.textContent = "Cannot reach the server"; }
+};
+$("openCancel").onclick = () => $("dOpen").close();
+$("openGo").onclick = () => {
+  const n = parseInt($("openNum").value, 16);
+  if (n >= 0x100 && n <= 0x8FF) { $("dOpen").close(); openPage(n); } else toast("Page must be 100-899");
+};
+$("bNew").onclick = () => {
+  if (!okToLeave()) return;
+  subs = [blank()]; cur = 0; cycle = 8; links = [0, 0, 0, 0, 0x100]; desc = "";
+  row = 1; col = 0; undoStack = []; redoStack = []; dirty = false; onServer = false;
+  render(); openSettings();
+};
+$("bDelete").onclick = async () => {
+  if (!confirm("Delete page " + hex3(pageNum) + " from the server?")) return;
+  const j = await post("api/delete?p=" + hex3(pageNum));
+  if (j) toast(j.ok ? "Page " + hex3(pageNum) + " deleted" : j.error, 4000);
+  if (j && j.ok) { onServer = false; dirty = true; updateTitle(); }
+};
+$("bPassword").onclick = async () => {
+  if (!(await askPassword())) return;
+  const j = await post("api/auth");
+  if (j) toast(j.ok ? "Password accepted" : j.error, 4000);
+};
+$("bView").onclick = () => window.open("./", "_blank");
+
+function openSettings() {
+  $("sNum").value = hex3(pageNum); $("sCycle").value = cycle; $("sDesc").value = desc;
+  for (let i = 0; i < 5; i++) $("sL" + i).value = links[i] ? hex3(links[i]) : "";
+  $("dSettings").showModal();
+}
+$("bSettings").onclick = openSettings;
+$("setCancel").onclick = () => $("dSettings").close();
+$("setOk").onclick = () => {
+  const n = parseInt($("sNum").value, 16);
+  if (!(n >= 0x100 && n <= 0x8FF)) { toast("Page must be 100-899"); return; }
+  const lk = [0, 1, 2, 3, 4].map(i => { const v = parseInt($("sL" + i).value, 16) || 0; return v >= 0x100 && v <= 0x8FF ? v : 0; });
+  if (n !== pageNum) onServer = false;
+  pageNum = n; cycle = Math.max(1, parseInt($("sCycle").value) || 8);
+  links = lk; if (!links[4]) links[4] = 0x100;
+  desc = $("sDesc").value;
+  $("dSettings").close(); changed();
+};
+
+window.addEventListener("beforeunload", e => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+setInterval(() => { phase = !phase; render(); }, 500);
+
+const start = parseInt(new URLSearchParams(location.search).get("p") || "", 16);
+updateTitle(); render();
+if (start >= 0x100 && start <= 0x8FF) openPage(start);
+</script>
+</body>
+</html>

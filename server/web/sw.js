@@ -4,8 +4,8 @@
  * instantly and still starts when the server can't be reached.
  * Page data (/api/...) always comes live from the server - never cached.
  */
-const VERSION = "ttx-v1";
-const SHELL = ["./", "index.html", "manifest.json", "icon-192.png", "icon-512.png", "icon-maskable.png"];
+const VERSION = "ttx-v2";
+const SHELL = ["./", "index.html", "manifest.json", "icon-192.png", "icon-512.png", "icon-maskable.png", "edit.html"];
 
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
